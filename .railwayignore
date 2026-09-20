@@ -1,0 +1,3 @@
+# Le sous-module de reference mobile n'intervient jamais dans le build :
+# il n'existe que pour le developpement (cf. scripts/check-web-independence.mjs).
+mobile_src

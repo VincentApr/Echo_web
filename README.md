@@ -1,4 +1,51 @@
-# React + TypeScript + Vite
+# Echo Web
+
+Application web Echo, hébergée sur <https://web.echosocial.fr> (le site vitrine
+`EchoInternet` occupe `echosocial.fr` et y renvoie depuis son bouton
+« Messagerie Web »).
+
+## Sous-module mobile
+
+`mobile_src` ([`VincentApr/Echo_social`](https://github.com/VincentApr/Echo_social))
+est une **référence de développement uniquement**. Le build ne s'en sert jamais :
+aucun fichier de `src/` ni aucune configuration n'y fait référence, et le script
+[`scripts/check-web-independence.mjs`](scripts/check-web-independence.mjs) —
+lancé automatiquement en `prebuild` — fait échouer la compilation si une
+référence à `mobile_src` ou `@mobile` réapparaît.
+
+Conséquence : la compilation réussit avec `mobile_src` vide. C'est exactement ce
+qui se passe en production, Railway ne récupérant pas les sous-modules.
+
+Pour disposer de la référence en local :
+
+```sh
+git submodule update --init
+```
+
+## Développement
+
+```sh
+npm ci
+npm run dev
+```
+
+Le serveur de dev relaie `/api`, `/messaging`, `/ws`, etc. vers le backend (cf.
+`vite.config.ts`). En production, `src/config/api.ts` bascule sur l'URL absolue
+du backend : aucun relais n'est nécessaire.
+
+## Déploiement (Railway)
+
+```sh
+npm ci
+npm run build   # produit dist/
+npm start       # sert dist/ via server.js
+```
+
+Configuration : [`railway.toml`](railway.toml), [`nixpacks.toml`](nixpacks.toml)
+et [`server.js`](server.js) (Express, port `PORT`, repli SPA sur `index.html`).
+
+Le domaine `web.echosocial.fr` doit figurer dans `CORS_ALLOWED_ORIGINS` et
+`CSRF_TRUSTED_ORIGINS` du backend, sinon tous les appels API sont rejetés.
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
