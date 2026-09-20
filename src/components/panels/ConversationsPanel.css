@@ -141,17 +141,6 @@
 .conv-panel--columns-2 .conv-panel__grid--subgroups { grid-template-columns: repeat(2, 72px); }
 .conv-panel--columns-3 .conv-panel__grid--subgroups { grid-template-columns: repeat(3, 72px); }
 
-.conv-panel--private .conv-panel__search-wrap { padding: 0 10px; }
-
-.conv-panel--private .conv-panel__search-icon {
-  margin-right: 5px;
-}
-
-.conv-panel--private .conv-panel__grid-scroll {
-  padding-right: 0;
-  padding-left: 0;
-}
-
 /* ── Conversation square — mirrors mobile ConversationSquare ── */
 .conv-square {
   position: relative;
@@ -351,23 +340,6 @@
 }
 
 /* Chevron inside the name badge for expandable parent groups */
-.conv-square__chevron {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  color: rgba(75, 85, 99, 0.8);
-  cursor: pointer;
-  padding: 1px;
-  border-radius: 4px;
-  line-height: 1;
-}
-
-.conv-square__chevron:hover {
-  color: rgba(75, 85, 99, 1);
-  background: rgba(75, 85, 99, 0.12);
-}
-
 /* Subgroup variant — slightly smaller, same style */
 .conv-square--subgroup {
   box-shadow: 0 0 4px rgba(75, 85, 99, 0.16);
@@ -379,8 +351,13 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 4px 2px;
+  padding: 6px 2px 24px;
 }
+
+.conv-panel__groups-focus { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: 6px 2px 24px; }
+.conv-panel__groups-focus-parent { display: flex; justify-content: center; width: 100%; }
+.conv-panel__subgroup-expansion.conv-panel__subgroup-expansion--focused { width: 100%; margin: 0; padding: 4px 0 28px; background: transparent; border: 0; border-radius: 0; }
+.conv-panel__subgroup-expansion--focused .conv-panel__grid--subgroups { justify-content: center; row-gap: 30px; }
 
 .conv-panel__group-row-block {
   display: flex;
@@ -393,7 +370,7 @@
   grid-template-columns: 80px;
   justify-content: center;
   gap: 10px;
-  padding: 4px 0;
+  padding: 0;
 }
 
 /* Inline subgroup expansion — mirrors mobile inlineExpandedRow */
@@ -458,13 +435,47 @@
 }
 
 /* Expandable name badge — whole badge acts as toggle */
-.conv-square__name-badge--expandable {
+.conv-panel .conv-square__name-badge--expandable {
   cursor: pointer;
+  left: 50%;
+  right: auto;
+  bottom: -24px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 124px;
+  min-height: 17px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .055);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  opacity: 1;
+  gap: 5px;
+  justify-content: center;
+  line-height: 15px;
 }
 
 .conv-square__name-badge--expandable:hover {
-  background: rgba(255, 255, 255, 1);
-  opacity: 0.85;
+  background: rgba(255, 255, 255, .98);
+}
+
+.conv-square__name-badge--expandable .conv-square__name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 92px;
+  text-align: center;
+}
+
+.conv-square__name-chevron {
+  display: flex;
+  flex: 0 0 auto;
+  color: #6d7873;
+}
+
+.conv-square__name-chevron--open {
+  color: #0a9168;
 }
 
 /* ── Loading / empty ── */

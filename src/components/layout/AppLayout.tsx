@@ -19,7 +19,7 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [savedPanelWidth, setSavedPanelWidth] = useState(() => {
     const stored = Number(localStorage.getItem('echo:sidebar-panel-width'));
-    return Number.isFinite(stored) ? Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, stored)) : SIDEBAR_PANEL_MIN_WIDTH;
+    return Number.isFinite(stored) ? Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, stored)) : getSidebarPanelWidthForColumns(2);
   });
   const [isResizingPanel, setIsResizingPanel] = useState(false);
 

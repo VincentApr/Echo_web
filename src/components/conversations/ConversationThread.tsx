@@ -140,15 +140,18 @@ function AgentCard({ msg, threadMessages, isAutoExpanded, isAgentConversation, o
         <div className={`agent-card agent-card--mobile ${expanded ? 'agent-card--expanded' : ''}`}>
 
             {/* ── Header (always visible) ──────────────────────────────── */}
-            <button
-                type="button"
-                className={`agent-card__mobile-toggle ${firstThreadMessageIsMine ? 'agent-card__mobile-toggle--left' : ''}`}
-                onClick={() => setExpanded(v => !v)}
-                aria-expanded={expanded}
-                aria-label={expanded ? 'Replier le panneau agent' : 'Déplier le panneau agent'}
-            >
-                {expanded ? <IoChevronUp size={24} /> : <IoChevronDown size={24} />}
-            </button>
+            <div className="agent-card__topline">
+                <span className="agent-card__agent-name">{agentName}</span>
+                {expanded && <button
+                    type="button"
+                    className={`agent-card__mobile-toggle ${firstThreadMessageIsMine ? 'agent-card__mobile-toggle--left' : ''}`}
+                    onClick={() => setExpanded(v => !v)}
+                    aria-expanded={expanded}
+                    aria-label={expanded ? 'Replier le panneau agent' : 'Déplier le panneau agent'}
+                >
+                    <IoChevronUp size={24} />
+                </button>}
+            </div>
 
             {!expanded && (
                 <button type="button" className="agent-card__mobile-preview" onClick={() => setExpanded(true)}>

@@ -164,7 +164,7 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange, co
     const convUuid = conv.uuid;
     const groupUuid = conv.group_info?.uuid;
     const isCurrentlyExpanded = !!expandedGroupUuids[convUuid];
-    setExpandedGroupUuids(prev => ({ ...prev, [convUuid]: !isCurrentlyExpanded }));
+    setExpandedGroupUuids(isCurrentlyExpanded ? {} : { [convUuid]: true });
     // Fetch subgroups on first expand (always fetch, even if already in fetchedSubgroups,
     // so we get fresh data with conversation_uuid from the updated serializer)
     if (!isCurrentlyExpanded && groupUuid) {
@@ -242,20 +242,9 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange, co
           </span>
         )}
 
-        <div
-          className={`conv-square__name-badge${hasChildren ? ' conv-square__name-badge--expandable' : ''}`}
-          role={hasChildren ? 'button' : undefined}
-          aria-label={hasChildren ? (isExpanded ? 'Réduire' : 'Voir les sous-groupes') : undefined}
-          onClick={hasChildren ? e => { e.stopPropagation(); void toggleExpand(conv); } : undefined}
-        >
+        <div className={`conv-square__name-badge ${hasChildren ? 'conv-square__name-badge--expandable' : ''}`} role={hasChildren ? 'button' : undefined} tabIndex={hasChildren ? 0 : undefined} aria-label={hasChildren ? (isExpanded ? 'Revenir à tous les groupes' : 'Afficher les sous-groupes') : undefined} onClick={hasChildren ? e => { e.stopPropagation(); void toggleExpand(conv); } : undefined} onKeyDown={hasChildren ? e => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); void toggleExpand(conv); } } : undefined}>
           <span className="conv-square__name">{conv.name}</span>
-          {hasChildren && (
-            <span className="conv-square__chevron">
-              {isExpanded
-                ? <IoChevronUpOutline size={11} />
-                : <IoChevronDownOutline size={11} />}
-            </span>
-          )}
+          {hasChildren && <span className={`conv-square__name-chevron ${isExpanded ? 'conv-square__name-chevron--open' : ''}`}>{isExpanded ? <IoChevronUpOutline size={12} /> : <IoChevronDownOutline size={12} />}</span>}
         </div>
       </button>
     );
@@ -282,6 +271,18 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange, co
 
     // Root groups only in main grid
     const rootConvs = filtered.filter(isRootGroup);
+    const focusedRoot = rootConvs.find(conv => expandedGroupUuids[conv.uuid]);
+
+    if (focusedRoot) {
+      const subgroupConvs = getSubgroupConvsForDisplay(focusedRoot);
+      const isLoadingSubgroups = !!loadingExpand[focusedRoot.uuid];
+      return <div className="conv-panel__groups-focus">
+        <div className="conv-panel__groups-focus-parent">{renderSquare(focusedRoot)}</div>
+        <div className="conv-panel__subgroup-expansion conv-panel__subgroup-expansion--focused">
+          {isLoadingSubgroups ? <div className="conv-panel__spinner conv-panel__spinner--sm" /> : subgroupConvs.length > 0 ? <div className="conv-panel__grid conv-panel__grid--subgroups">{subgroupConvs.map(sub => renderSquare(sub, { isSubgroup: true }))}</div> : <p className="conv-panel__empty conv-panel__empty--sm">Aucun sous-groupe</p>}
+        </div>
+      </div>;
+    }
 
     // Build rows of GRID_COLS, with "add" button occupying the first slot
     const slots: Array<Conversation | '__add__'> = ['__add__', ...rootConvs];
@@ -294,14 +295,6 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange, co
     return (
       <div className="conv-panel__groups-layout">
         {rows.map((row, rowIdx) => {
-          // Find the expanded group in this row (if any)
-          const expandedConvInRow = row.find(
-            item => item !== '__add__' && expandedGroupUuids[(item as Conversation).uuid]
-          ) as Conversation | undefined;
-          const subgroupConvs = expandedConvInRow ? getSubgroupConvsForDisplay(expandedConvInRow) : [];
-          const isLoadingSubgroups = expandedConvInRow ? !!loadingExpand[expandedConvInRow.uuid] : false;
-          const isExpanded = !!expandedConvInRow;
-
           return (
             <div key={rowIdx} className="conv-panel__group-row-block">
               {/* Row of parent squares */}
@@ -322,21 +315,6 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange, co
                   ) : renderSquare(item as Conversation)
                 )}
               </div>
-
-              {/* Inline subgroup expansion — appears right after the row */}
-              {isExpanded && (
-                <div className="conv-panel__subgroup-expansion">
-                  {isLoadingSubgroups ? (
-                    <div className="conv-panel__spinner conv-panel__spinner--sm" />
-                  ) : subgroupConvs.length > 0 ? (
-                    <div className="conv-panel__grid conv-panel__grid--subgroups">
-                      {subgroupConvs.map(sub => renderSquare(sub, { isSubgroup: true }))}
-                    </div>
-                  ) : (
-                    <p className="conv-panel__empty conv-panel__empty--sm">Aucun sous-groupe</p>
-                  )}
-                </div>
-              )}
             </div>
           );
         })}
