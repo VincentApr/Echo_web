@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { IoChevronBack, IoPersonAddOutline, IoSearchOutline, IoSend } from 'react-icons/io5';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { useNavigation } from '../contexts/NavigationContext';
 import './AddPage.css';
 

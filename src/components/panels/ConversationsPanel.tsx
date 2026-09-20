@@ -6,8 +6,8 @@ import {
   IoSearchOutline, IoAdd,
   IoChevronDownOutline, IoChevronUpOutline,
 } from 'react-icons/io5';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import './ConversationsPanel.css';
 
 interface ConversationsPanelProps {

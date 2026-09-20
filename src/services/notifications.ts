@@ -1,5 +1,4 @@
-// Web stubs for expo-notifications — no-op implementations
-// These replace @mobile/utils/notifications for the web platform
+// Browser notification compatibility layer. Native push operations are no-ops.
 
 export async function registerForPushNotifications(_accessToken: string): Promise<string | null> {
     return null;

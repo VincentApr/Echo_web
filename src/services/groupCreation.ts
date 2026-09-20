@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { syncConversationsByType } from './localSync';
 
 interface GroupDetail {

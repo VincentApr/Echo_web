@@ -7,11 +7,11 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useJarvis } from '../contexts/JarvisContext';
 import { AgentContentRenderer } from '../components/conversations/AgentContentRenderer';
-import { archiveConversation, sendTemporaryJarvisAgentMessage } from '@mobile/services/jarvisAgentConversation';
+import { archiveConversation, sendTemporaryJarvisAgentMessage } from '@web/services/jarvisAgentConversation';
 import { useNavigation } from '../contexts/NavigationContext';
 import { useConversations } from '../hooks/useConversations';
 import { CONVERSATION_PINS_EVENT, getPinnedConversationUuids } from '../services/conversationPins';
-import jarvisLogo from '@mobile/assets/images/logo-watermark.png';
+import jarvisLogo from '@web/assets/logo-watermark.png';
 import './HomePage.css';
 
 interface HomeSuggestion {

@@ -1,5 +1,4 @@
-// Web stub for @mobile/services/apiClient
-// Implements fetchWithAuth with Bearer token injection and automatic token refresh
+// Web API client with Bearer token injection and automatic token refresh.
 
 let logoutCallback: (() => void) | null = null;
 

@@ -1,4 +1,4 @@
-// Web stub for @mobile/constants/cgu
+// Conditions displayed and accepted by the web client.
 export const CURRENT_CGU_VERSION = '2026-03-28';
 export const CURRENT_CGU_LAST_UPDATED_LABEL = '28/03/2026';
 

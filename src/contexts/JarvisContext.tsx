@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
-import { sendTemporaryJarvisAgentMessage } from '@mobile/services/jarvisAgentConversation';
+import { sendTemporaryJarvisAgentMessage } from '@web/services/jarvisAgentConversation';
 import { useAuth } from './AuthContext';
 import {
     sendJarvisInteraction as sendJarvisInteractionRequest,

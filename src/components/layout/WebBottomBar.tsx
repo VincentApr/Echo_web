@@ -3,10 +3,10 @@ import { IoSend, IoAdd, IoMic, IoClose, IoConstructOutline, IoImage, IoDocument,
 import { useQuery } from '@tanstack/react-query';
 import { useJarvis } from '../../contexts/JarvisContext';
 import { useNavigation } from '../../contexts/NavigationContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { enrichAgent, type BackendAgent, type ToolItem } from '../../data/toolsCatalog';
-import aiWatermark from '@mobile/assets/images/logo-watermark.png';
+import aiWatermark from '@web/assets/logo-watermark.png';
 import './WebBottomBar.css';
 
 const getFirstNonEmptyLine = (text?: string): string => {

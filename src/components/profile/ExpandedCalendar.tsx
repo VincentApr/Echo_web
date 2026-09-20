@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { IoChevronBackOutline, IoChevronForwardOutline, IoTimeOutline, IoLocationOutline, IoCalendarOutline } from 'react-icons/io5';
 
 interface CalendarEvent {

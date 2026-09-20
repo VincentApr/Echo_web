@@ -1,4 +1,4 @@
-// Web-specific API config
+// Web-specific API configuration.
 // Uses relative URLs so Vite's dev proxy can forward to the production backend
 // In production build, this should be replaced with the actual API URL
 

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { IoSparklesOutline } from 'react-icons/io5';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 
 interface JarvisInstance {
     is_active: boolean;

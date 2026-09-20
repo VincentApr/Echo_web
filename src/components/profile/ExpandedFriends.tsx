@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { IoPeopleCircleOutline, IoMailOutline, IoPeopleOutline, IoTrashOutline, IoCheckmarkOutline, IoCloseOutline } from 'react-icons/io5';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { useFriendRequests } from '../../hooks/useFriendRequests';
 
 interface Connection {

@@ -2,8 +2,8 @@ import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { IoCheckmark, IoCheckmarkDone, IoChevronDown, IoChevronUp, IoDocumentTextOutline, IoTimeOutline, IoWarningOutline } from 'react-icons/io5';
 import type { Message, InteractiveMessageData, FormField } from '../../hooks/useMessages';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { MessageContextMenu } from './MessageContextMenu';
 import { isFailedAssetUrl, markFailedAssetUrl } from '../../utils/failedAssetUrls';
 import { isSystemMessage } from '../../utils/messageHelpers';

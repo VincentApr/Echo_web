@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
 import { fetchOlderMessagesPageAndPersist, fetchOlderMessagesPageByOffsetAndPersist, hydrateConversationHistoryFromDetail, syncLatestMessagesForConversation, syncNewerMessagesForConversation } from '../services/localSync';
 import { webLogger } from '../utils/logger';

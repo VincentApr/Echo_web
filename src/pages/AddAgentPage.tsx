@@ -4,8 +4,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAgentFramework, type Agent } from '../hooks/useAgentFramework';
 import { useConversations } from '../hooks/useConversations';
 import { useNavigation } from '../contexts/NavigationContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import './AddPage.css';
 
 export default function AddAgentPage() {

@@ -1,8 +1,8 @@
 import React from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import {
     IoPeopleOutline, IoChatbubblesOutline, IoSendOutline, IoMailOutline,
     IoCalendarOutline, IoAlbumsOutline, IoFlashOutline, IoTrendingUpOutline,

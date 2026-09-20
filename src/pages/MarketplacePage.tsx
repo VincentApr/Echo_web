@@ -6,8 +6,8 @@ import {
     IoChatbubblesOutline, IoCalendarOutline, IoInformationCircleOutline, IoPeopleOutline,
     IoCreateOutline, IoTrashOutline, IoGlobeOutline, IoCompassOutline, IoPersonOutline, IoAddOutline,
 } from 'react-icons/io5';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { TOOL_CATEGORIES, enrichAgent, getCategoryById, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
 import './MarketplacePage.css';
 

@@ -1,5 +1,4 @@
-// Web storage — pure localStorage implementation
-// Replaces @mobile/utils/storage for web platform
+// Browser storage adapter used by the web client.
 
 export const storage = {
     async getItemAsync(key: string): Promise<string | null> {

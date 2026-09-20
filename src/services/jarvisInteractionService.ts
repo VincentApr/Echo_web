@@ -1,5 +1,5 @@
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 
 export type JarvisInteractionMode = 'global' | 'conversation_thread' | 'jarvis_conversation';
 export type JarvisToolMode = 'auto' | 'force';

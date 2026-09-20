@@ -1,8 +1,8 @@
 // Web hook: Jarvis notification summaries
 // Extracted from the 2200-line MessagingContext for lightweight web usage
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
 import { useAuth } from '../contexts/AuthContext';
 
 export interface MessageSummary {

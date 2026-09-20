@@ -1,6 +1,5 @@
-// Web stub for @mobile/utils/cgu
-// Tracks CGU acceptance per user via localStorage
-import { CURRENT_CGU_VERSION } from './cgu-constants';
+// Tracks CGU acceptance per user via localStorage.
+import { CURRENT_CGU_VERSION } from '../constants/cgu';
 
 const cguKey = (uuid: string) => `echo_cgu_accepted_${uuid}`;
 

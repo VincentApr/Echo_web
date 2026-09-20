@@ -1,18 +1,18 @@
-// Web AuthContext — adapted from mobile_src/contexts/AuthContext.tsx
+// Authentication context for the web application.
 // Reuses: fetchWithAuth, setLogoutCallback, storage, API_BASE_URL
 // Removes: expo-router, push notifications, DatabaseManager, SQLite
 
-import { API_BASE_URL } from '@mobile/config/api';
-import { CURRENT_CGU_VERSION } from '@mobile/constants/cgu';
-import { fetchWithAuth, setLogoutCallback } from '@mobile/services/apiClient';
-import { hasAcceptedCurrentCguLocally, markCurrentCguAcceptedLocally } from '@mobile/utils/cgu';
-import { cacheManager } from '../stubs/CacheManager';
-import { storage } from '@mobile/utils/storage';
+import { API_BASE_URL } from '@web/config/api';
+import { CURRENT_CGU_VERSION } from '@web/constants/cgu';
+import { fetchWithAuth, setLogoutCallback } from '@web/services/apiClient';
+import { hasAcceptedCurrentCguLocally, markCurrentCguAcceptedLocally } from '@web/utils/cgu';
+import { cacheManager } from '@web/services/cacheManager';
+import { storage } from '@web/services/storage';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-import type { User as ApiUser } from '@mobile/types/api';
+import type { User as ApiUser } from '@web/types/api';
 
 export interface User extends ApiUser {
     email: string;

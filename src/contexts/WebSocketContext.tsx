@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './AuthContext';
-import { WS_BASE_URL } from '@mobile/config/api';
+import { WS_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
 

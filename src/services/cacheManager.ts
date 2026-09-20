@@ -1,5 +1,4 @@
-// Web CacheManager — uses localStorage instead of AsyncStorage
-// Simplified version of the mobile CacheManager for web platform
+// Web cache manager backed by memory and localStorage.
 
 interface CacheEntry<T> {
     value: T;

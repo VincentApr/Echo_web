@@ -16,19 +16,7 @@
     "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@mobile/config/api": ["./src/stubs/api.ts"],
-      "@mobile/services/apiClient": ["./src/stubs/apiClient.ts"],
-      "@mobile/types/api": ["./src/stubs/api-types.ts"],
-      "@mobile/constants/cgu": ["./src/stubs/cgu-constants.ts"],
-      "@mobile/utils/cgu": ["./src/stubs/cgu-utils.ts"],
-      "@mobile/utils/storage": ["./src/stubs/storage.ts"],
-      "@mobile/utils/notifications": ["./src/stubs/notifications.ts"],
-      "@mobile/services/DatabaseManager": ["./src/stubs/DatabaseManager.ts"],
-      "@mobile/utils/CacheManager": ["./src/stubs/CacheManager.ts"],
-      "@mobile/utils/networkErrors": ["./src/stubs/networkErrors.ts"],
-      "@mobile/utils/routeParams": ["./src/stubs/routeParams.ts"],
-      "@mobile/*": ["./mobile_src/*"],
-      "@/*": ["./mobile_src/*"]
+      "@web/*": ["./src/*"]
     },
     /* Bundler mode */
     "moduleResolution": "bundler",
@@ -47,8 +35,5 @@
   },
   "include": [
     "src"
-  ],
-  "exclude": [
-    "mobile_src"
   ]
 }

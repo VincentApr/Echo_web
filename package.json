@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "check:independence": "node scripts/check-web-independence.mjs",
+    "prebuild": "npm run check:independence",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview"

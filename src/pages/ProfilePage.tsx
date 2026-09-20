@@ -11,9 +11,9 @@ import {
 } from 'react-icons/io5';
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
-import { fetchWithAuth } from '@mobile/services/apiClient';
-import { API_BASE_URL } from '@mobile/config/api';
-import { CGU_CONTENT, CGU_TITLE } from '@mobile/constants/cgu';
+import { fetchWithAuth } from '@web/services/apiClient';
+import { API_BASE_URL } from '@web/config/api';
+import { CGU_CONTENT, CGU_TITLE } from '@web/constants/cgu';
 import ExpandedFriends from '../components/profile/ExpandedFriends';
 import ExpandedStats from '../components/profile/ExpandedStats';
 import ExpandedCalendar from '../components/profile/ExpandedCalendar';

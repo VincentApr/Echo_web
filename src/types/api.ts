@@ -1,5 +1,4 @@
-// Web stub for @mobile/types/api
-// Core types shared between mobile and web
+// Core API types used by the web client.
 
 export interface User {
   uuid: string;

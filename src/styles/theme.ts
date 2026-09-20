@@ -1,5 +1,5 @@
 // Echo Web Design System — Colors & Variables
-// Directly sourced from mobile_src/constants/colors.ts and BottomBarV2 emerald theme
+// Shared Echo colors and emerald interface theme.
 
 export const ECHO_COLOR = 'rgba(10, 145, 104, 0.8)';
 export const ECHO_COLOR_SOLID = 'rgba(10, 145, 104, 1)';
