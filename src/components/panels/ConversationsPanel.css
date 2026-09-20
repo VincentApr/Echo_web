@@ -122,13 +122,24 @@
   padding-bottom: 24px;
 }
 
-.conv-panel--two-columns .conv-panel__grid--private,
-.conv-panel--two-columns.conv-panel--agents .conv-panel__grid,
-.conv-panel--two-columns .conv-panel__grid--groups-row {
+.conv-panel--columns-2 .conv-panel__grid--private,
+.conv-panel--columns-2.conv-panel--agents .conv-panel__grid,
+.conv-panel--columns-2 .conv-panel__grid--groups-row {
   grid-template-columns: repeat(2, 80px);
   justify-content: center;
   column-gap: 10px;
 }
+
+.conv-panel--columns-3 .conv-panel__grid--private,
+.conv-panel--columns-3.conv-panel--agents .conv-panel__grid,
+.conv-panel--columns-3 .conv-panel__grid--groups-row {
+  grid-template-columns: repeat(3, 80px);
+  justify-content: center;
+  column-gap: 10px;
+}
+
+.conv-panel--columns-2 .conv-panel__grid--subgroups { grid-template-columns: repeat(2, 72px); }
+.conv-panel--columns-3 .conv-panel__grid--subgroups { grid-template-columns: repeat(3, 72px); }
 
 .conv-panel--private .conv-panel__search-wrap { padding: 0 10px; }
 

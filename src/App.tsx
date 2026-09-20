@@ -52,7 +52,7 @@ function AppContent() {
     }
   };
 
-  const renderPanelContent = (activePage: PageId, onSearchExpansionChange: (expanded: boolean) => void) => {
+  const renderPanelContent = (activePage: PageId, onSearchExpansionChange: (expanded: boolean) => void, columns: number) => {
     if (!isLoggedIn) return null;
 
     const filterMap: Partial<Record<PageId, 'private' | 'groups' | 'agents'>> = {
@@ -65,7 +65,7 @@ function AppContent() {
     };
     const filter = filterMap[activePage];
     if (!filter) return null;
-    return <ConversationsPanel filter={filter} onSearchExpansionChange={onSearchExpansionChange} />;
+    return <ConversationsPanel filter={filter} onSearchExpansionChange={onSearchExpansionChange} columns={columns} />;
   };
 
   return (

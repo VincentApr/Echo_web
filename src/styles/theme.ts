@@ -32,7 +32,7 @@ export const SIDEBAR_ICON_WIDTH = 60;
 export const SIDEBAR_PANEL_GRID_ITEM_SIZE = 80;
 export const SIDEBAR_PANEL_GRID_GAP = 10;
 export const SIDEBAR_PANEL_GRID_GUTTER = 54;
-export const SIDEBAR_PANEL_SNAP_COLUMNS = [1, 2, 3, 4] as const;
+export const SIDEBAR_PANEL_SNAP_COLUMNS = [1, 2, 3] as const;
 
 export const getSidebarPanelWidthForColumns = (columns: number) => (
     SIDEBAR_PANEL_GRID_GUTTER +

@@ -36,13 +36,16 @@ interface SidebarProps {
     panelWidth: number;
     isPanelOpen: boolean;
     isResizing: boolean;
+    onResizeStart: () => void;
+    onPanelWidthChange: (width: number) => void;
+    onResizeEnd: (width: number) => void;
     userPhoto?: string | null;
     userName?: string;
     isLoggedIn: boolean;
     onLogout: () => void;
 }
 
-export default function Sidebar({ activePage, onNavigate, panelContent, panelWidth, isPanelOpen, isResizing, userPhoto, userName, isLoggedIn, onLogout }: SidebarProps) {
+export default function Sidebar({ activePage, onNavigate, panelContent, panelWidth, isPanelOpen, isResizing, onResizeStart, onPanelWidthChange, onResizeEnd, userPhoto, userName, isLoggedIn, onLogout }: SidebarProps) {
     const [hoveredItem, setHoveredItem] = useState<PageId | null>(null);
 
     const handleClick = useCallback((item: NavItem) => {
@@ -51,6 +54,22 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
 
     // Total green body width = icon rail + panel (when open)
     const greenBodyWidth = isPanelOpen ? 60 + panelWidth : 60;
+
+    const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+        event.preventDefault();
+        const startX = event.clientX;
+        const startWidth = panelWidth;
+        onResizeStart();
+        const handleMove = (moveEvent: PointerEvent) => onPanelWidthChange(startWidth + moveEvent.clientX - startX);
+        const handleUp = (upEvent: PointerEvent) => {
+            const finalWidth = startWidth + upEvent.clientX - startX;
+            document.removeEventListener('pointermove', handleMove);
+            document.removeEventListener('pointerup', handleUp);
+            onResizeEnd(finalWidth);
+        };
+        document.addEventListener('pointermove', handleMove);
+        document.addEventListener('pointerup', handleUp);
+    };
 
     return (
         <div className="sidebar">
@@ -125,6 +144,7 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
                     )}
                 </div>
             </div>
+            {isPanelOpen && <div className="sidebar__resize-handle" onPointerDown={handleResizePointerDown} aria-label="Redimensionner la barre latérale" />}
         </div>
     );
 }

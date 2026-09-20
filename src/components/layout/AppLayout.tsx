@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import Sidebar, { type PageId } from './Sidebar';
 import WebBottomBar from './WebBottomBar';
-import { getSidebarPanelWidthForColumns } from '../../styles/theme';
+import { getSidebarPanelWidthForColumns, SIDEBAR_PANEL_MAX_WIDTH, SIDEBAR_PANEL_MIN_WIDTH } from '../../styles/theme';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import './AppLayout.css';
 
 interface AppLayoutProps {
   children: (activePage: PageId) => React.ReactNode;
-  panelContent: (activePage: PageId, onSearchExpansionChange: (expanded: boolean) => void) => React.ReactNode | null;
+  panelContent: (activePage: PageId, onSearchExpansionChange: (expanded: boolean) => void, columns: number) => React.ReactNode | null;
 }
 
 const PAGES_WITH_PANEL: PageId[] = ['conversations', 'groups', 'agents', 'add-friend', 'add-group', 'add-agent'];
@@ -17,11 +17,27 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const { user, isLoggedIn, logout } = useAuth();
   const { currentPage, navigate, isSidebarPanelOpen, conversationView } = useNavigation();
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
+  const [savedPanelWidth, setSavedPanelWidth] = useState(() => {
+    const stored = Number(localStorage.getItem('echo:sidebar-panel-width'));
+    return Number.isFinite(stored) ? Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, stored)) : SIDEBAR_PANEL_MIN_WIDTH;
+  });
+  const [isResizingPanel, setIsResizingPanel] = useState(false);
 
   const isPanelOpen = PAGES_WITH_PANEL.includes(currentPage) && isSidebarPanelOpen;
   const isImmersivePage = currentPage === 'add-friend' || currentPage === 'add-group' || currentPage === 'add-agent' || currentPage === 'marketplace' || currentPage === 'profile';
-  const panelWidth = getSidebarPanelWidthForColumns(isSearchExpanded ? 2 : 1);
+  const panelWidth = Math.max(savedPanelWidth, isSearchExpanded ? getSidebarPanelWidthForColumns(2) : SIDEBAR_PANEL_MIN_WIDTH);
+  const panelColumns = panelWidth >= getSidebarPanelWidthForColumns(3) ? 3 : panelWidth >= getSidebarPanelWidthForColumns(2) ? 2 : 1;
   const handleSearchExpansionChange = useCallback((expanded: boolean) => setIsSearchExpanded(expanded), []);
+  const handlePanelWidthChange = useCallback((width: number) => {
+    setSavedPanelWidth(Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, width)));
+  }, []);
+  const handlePanelResizeEnd = useCallback((width: number) => {
+    const snapWidths = [1, 2, 3].map(getSidebarPanelWidthForColumns);
+    const snapped = snapWidths.reduce((closest, candidate) => Math.abs(candidate - width) < Math.abs(closest - width) ? candidate : closest);
+    setSavedPanelWidth(snapped);
+    localStorage.setItem('echo:sidebar-panel-width', String(snapped));
+    setIsResizingPanel(false);
+  }, []);
 
   useEffect(() => setIsSearchExpanded(false), [currentPage, isSidebarPanelOpen]);
 
@@ -34,10 +50,13 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
         <Sidebar
           activePage={currentPage}
           onNavigate={navigate}
-          panelContent={isPanelOpen ? panelContent(currentPage, handleSearchExpansionChange) : null}
+          panelContent={isPanelOpen ? panelContent(currentPage, handleSearchExpansionChange, panelColumns) : null}
           panelWidth={panelWidth}
           isPanelOpen={isPanelOpen}
-          isResizing={false}
+          isResizing={isResizingPanel}
+          onResizeStart={() => setIsResizingPanel(true)}
+          onPanelWidthChange={handlePanelWidthChange}
+          onResizeEnd={handlePanelResizeEnd}
           userPhoto={userPhoto}
           userName={userName}
           isLoggedIn={isLoggedIn}

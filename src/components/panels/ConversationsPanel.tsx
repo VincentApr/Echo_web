@@ -13,6 +13,7 @@ import './ConversationsPanel.css';
 interface ConversationsPanelProps {
   filter: 'private' | 'groups' | 'agents';
   onSearchExpansionChange?: (expanded: boolean) => void;
+  columns?: number;
 }
 
 interface GroupMeta {
@@ -34,7 +35,7 @@ interface SubgroupInfo {
 }
 
 // Number of columns in the groups grid (matches repeat(auto-fill, 80px) at typical sidebar width)
-export default function ConversationsPanel({ filter, onSearchExpansionChange }: ConversationsPanelProps) {
+export default function ConversationsPanel({ filter, onSearchExpansionChange, columns = 1 }: ConversationsPanelProps) {
   const { isLoggedIn } = useAuth();
   const { privateConversations, groupConversations, agentConversations, isLoading } = useConversations();
   const { openConversation, selectedConversation, navigate } = useNavigation();
@@ -48,6 +49,7 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange }: 
   const [expandedGroupUuids, setExpandedGroupUuids] = useState<Record<string, boolean>>({});
   const [fetchedSubgroups, setFetchedSubgroups] = useState<Record<string, SubgroupInfo[]>>({});
   const [loadingExpand, setLoadingExpand] = useState<Record<string, boolean>>({});
+  const isSearchBarExpanded = isSearchOpen || columns > 1 || showTwoColumns;
 
   const setSearchOpen = (open: boolean) => {
     if (columnsCloseTimerRef.current !== null) window.clearTimeout(columnsCloseTimerRef.current);
@@ -81,6 +83,10 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange }: 
     if (columnsCloseTimerRef.current !== null) window.clearTimeout(columnsCloseTimerRef.current);
     onSearchExpansionChange?.(false);
   }, [onSearchExpansionChange]);
+
+  useEffect(() => {
+    if (columns === 1 && !isSearchOpen && !showTwoColumns) setSearch('');
+  }, [columns, isSearchOpen, showTwoColumns]);
 
   // ── Fetch group hierarchy metadata when in groups mode ──
   useEffect(() => {
@@ -280,7 +286,7 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange }: 
     // Build rows of GRID_COLS, with "add" button occupying the first slot
     const slots: Array<Conversation | '__add__'> = ['__add__', ...rootConvs];
     const rows: Array<Array<Conversation | '__add__'>> = [];
-    const gridColumns = showTwoColumns ? 2 : 1;
+    const gridColumns = Math.max(columns, showTwoColumns ? 2 : 1);
     for (let i = 0; i < slots.length; i += gridColumns) {
       rows.push(slots.slice(i, i + gridColumns));
     }
@@ -339,9 +345,9 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange }: 
   };
 
   return (
-    <div className={`conv-panel conv-panel--${filter} ${isSearchOpen ? 'conv-panel--search-open' : ''} ${showTwoColumns ? 'conv-panel--two-columns' : ''}`}>
+    <div className={`conv-panel conv-panel--${filter} conv-panel--columns-${Math.max(columns, showTwoColumns ? 2 : 1)} ${isSearchBarExpanded ? 'conv-panel--search-open' : ''}`}>
       {/* Search bar */}
-      <div ref={searchWrapRef} className="conv-panel__search-wrap" role={!isSearchOpen ? 'button' : undefined} tabIndex={!isSearchOpen ? 0 : undefined} onClick={() => { if (!isSearchOpen) setSearchOpen(true); }} onKeyDown={event => { if (!isSearchOpen && (event.key === 'Enter' || event.key === ' ')) setSearchOpen(true); }}>
+      <div ref={searchWrapRef} className="conv-panel__search-wrap" role={!isSearchBarExpanded ? 'button' : undefined} tabIndex={!isSearchBarExpanded ? 0 : undefined} onClick={() => { if (!isSearchBarExpanded) setSearchOpen(true); }} onKeyDown={event => { if (!isSearchBarExpanded && (event.key === 'Enter' || event.key === ' ')) setSearchOpen(true); }}>
         <IoSearchOutline size={16} className="conv-panel__search-icon" />
         <input
           ref={searchInputRef}
@@ -350,7 +356,7 @@ export default function ConversationsPanel({ filter, onSearchExpansionChange }: 
           aria-label="Rechercher une conversation"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          disabled={!isSearchOpen}
+          disabled={!isSearchBarExpanded}
         />
         {search && (
           <button className="conv-panel__search-clear" onClick={() => setSearch('')}>✕</button>
