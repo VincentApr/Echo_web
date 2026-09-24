@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "check:independence": "node scripts/check-web-independence.mjs",
+    "test:agent-threads": "node scripts/test-agent-thread-execution.mjs",
     "prebuild": "npm run check:independence",
     "build": "tsc -b && vite build",
     "start": "node server.js",

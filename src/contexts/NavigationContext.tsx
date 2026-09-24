@@ -3,8 +3,8 @@ import type { PageId } from '../components/layout/Sidebar';
 import type { Conversation } from '../hooks/useConversations';
 
 export interface ChatSendCallback {
-    sendText: (text: string, parentMessageUuid?: string | null) => void;
-    sendFiles: (text: string, files: File[], parentMessageUuid?: string | null) => void;
+    sendText: (text: string, parentMessageUuid?: string | null, aiAgentUuid?: string | null, agentThread?: boolean) => Promise<unknown>;
+    sendFiles: (text: string, files: File[], parentMessageUuid?: string | null, aiAgentUuid?: string | null, agentThread?: boolean) => Promise<unknown>;
 }
 
 /** Minimal message info needed to display a reply preview */
@@ -14,6 +14,7 @@ export interface ReplyTarget {
     content: string;
     attachments?: { file_type: string }[];
     isAgentThread?: boolean;
+    aiAgentUuid?: string;
 }
 
 interface NavigationContextType {

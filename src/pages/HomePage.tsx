@@ -11,7 +11,7 @@ import { archiveConversation, sendTemporaryJarvisAgentMessage } from '@web/servi
 import { useNavigation } from '../contexts/NavigationContext';
 import { useConversations } from '../hooks/useConversations';
 import { CONVERSATION_PINS_EVENT, getPinnedConversationUuids } from '../services/conversationPins';
-import jarvisLogo from '@web/assets/logo-watermark.png';
+import jarvisLogo from '@web/assets/logo-watermark.png?inline';
 import './HomePage.css';
 
 interface HomeSuggestion {

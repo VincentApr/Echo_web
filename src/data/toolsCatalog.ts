@@ -3,6 +3,7 @@
 export interface ToolItem {
     id: string;          // = agent uuid
     agentUuid: string;
+    avatarUrl?: string;
     name: string;
     description: string;
     longDescription: string;
@@ -201,6 +202,7 @@ export function enrichAgent(agent: BackendAgent): ToolItem {
     return {
         id: agent.uuid,
         agentUuid: agent.uuid,
+        avatarUrl: agent.avatar_url,
         name: agent.name,
         description: agent.description || 'Agent IA disponible sur Echo.',
         longDescription: enrichment.longDescription || agent.description || 'Cet agent peut vous aider à automatiser vos tâches et répondre à vos questions.',

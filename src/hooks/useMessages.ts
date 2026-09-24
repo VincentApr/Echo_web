@@ -6,6 +6,9 @@ import { API_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
 import { fetchOlderMessagesPageAndPersist, fetchOlderMessagesPageByOffsetAndPersist, hydrateConversationHistoryFromDetail, syncLatestMessagesForConversation, syncNewerMessagesForConversation } from '../services/localSync';
 import { webLogger } from '../utils/logger';
+import { useWebSocketContext } from '../contexts/WebSocketContext';
+import { JARVIS_AGENT_UUID } from '../constants/jarvisAgent';
+import { reserveAgentExecution, pendingAgentExecution, rememberThreadMessage } from '../services/agentThreadExecution';
 
 type BackgroundMessageSyncResult = {
     strategy: 'hydrate-latest' | 'incremental' | 'skip';
@@ -69,6 +72,8 @@ export interface Message {
     conversation_uuid?: string;
     attachments?: Attachment[];
     parent_message_uuid?: string | null;
+    web_agent_parent_uuid?: string;
+    web_agent_waiting_since?: number;
     interactive_data?: InteractiveMessageData;
     // Agent metadata
     framework_agent_name?: string;
@@ -76,6 +81,9 @@ export interface Message {
     agent_info?: { name?: string; uuid?: string };
     ai_agent_name?: string;
     ai_agent_uuid?: string;
+    agent_uuid?: string;
+    agent_name?: string;
+    is_agent_thread_root?: boolean;
     jarvis_prompt?: string;
     jarvis_preferred_tool?: string | null;
     jarvis_thread_root_uuid?: string | null;
@@ -91,6 +99,8 @@ interface SendMessageParams {
     content: string;
     parentMessageUuid?: string | null;
     files?: File[];
+    aiAgentUuid?: string | null;
+    agentThread?: boolean;
 }
 
 interface MessagesPage {
@@ -185,7 +195,8 @@ async function fetchMessagesDirectly(url: string, conversationUuid: string): Pro
 }
 
 export function useMessages(conversationId: string | null) {
-    const { user } = useAuth();
+    const { sendWsMessage, isConnected } = useWebSocketContext();
+    const { user, updateUser } = useAuth();
     const queryClient = useQueryClient();
     const historyBootstrapAttemptedRef = useRef(false);
 
@@ -629,18 +640,43 @@ export function useMessages(conversationId: string | null) {
     }, [conversationId, queryClient, user?.uuid]);
 
     const sendMessageMutation = useMutation({
-        mutationFn: async ({ conversationId, content, parentMessageUuid, files }: SendMessageParams) => {
+        mutationFn: async ({ conversationId, content, parentMessageUuid, files, aiAgentUuid, agentThread }: SendMessageParams) => {
+            if (agentThread && (!aiAgentUuid || !parentMessageUuid)) {
+                throw new Error('Impossible d’identifier l’agent de ce thread. Rouvre la conversation avant de réessayer.');
+            }
+            if ((aiAgentUuid || agentThread) && !isConnected) {
+                throw new Error('Connexion en cours. Réessaie une fois la connexion rétablie.');
+            }
+            if (aiAgentUuid && user?.uuid && pendingAgentExecution(user.uuid, aiAgentUuid, conversationId)) {
+                throw new Error('Cet agent prépare déjà une réponse dans cette conversation. Attends sa réponse avant de continuer.');
+            }
+            if (aiAgentUuid && user?.ai_agents_enabled === false) {
+                if (!window.confirm('Activer les agents IA dans les conversations ? Le message et le contexte de la conversation seront transmis à l’agent sélectionné.')) {
+                    throw new Error('Activation des agents annulée.');
+                }
+                const response = await fetchWithAuth(`${API_BASE_URL}/api/auth/profile/`, {
+                    method: 'PATCH', body: JSON.stringify({ ai_agents_enabled: true }),
+                });
+                if (!response.ok) throw new Error('Impossible d’activer les agents dans les conversations.');
+                await updateUser({ ...user, ...await response.json(), ai_agents_enabled: true });
+            }
             const tempUuid = `temp-${Date.now()}`;
+            // Reserve before sending, so two simultaneous replies cannot route
+            // a parentless framework response to the wrong thread.
+            const cancelExecution = agentThread && user?.uuid
+                ? reserveAgentExecution(user.uuid, conversationId, aiAgentUuid!, parentMessageUuid!)
+                : undefined;
             
             // Generate optimistic attachment previews
             const optimisticAttachments: Attachment[] = [];
             if (files && files.length > 0) {
                 files.forEach((file, index) => {
                     const isImage = file.type.startsWith('image/');
+                    const isAudio = file.type.startsWith('audio/');
                     optimisticAttachments.push({
                         uuid: `temp-att-${Date.now()}-${index}`,
-                        file_type: isImage ? 'image' : (file.type.startsWith('video/') ? 'video' : 'document'),
-                        file_url: isImage ? URL.createObjectURL(file) : '',
+                        file_type: isImage ? 'image' : (isAudio ? 'audio' : (file.type.startsWith('video/') ? 'video' : 'document')),
+                        file_url: isImage || isAudio ? URL.createObjectURL(file) : '',
                         original_filename: file.name
                     });
                 });
@@ -656,6 +692,15 @@ export function useMessages(conversationId: string | null) {
                 created_at: new Date().toISOString(),
                 isPending: true,
                 parent_message_uuid: parentMessageUuid,
+                ...(agentThread && parentMessageUuid ? { web_agent_parent_uuid: parentMessageUuid } : {}),
+                // Keep the initial user prompt inside an agent panel while
+                // waiting for the server root, rather than showing plain chat.
+                ...(aiAgentUuid && !agentThread ? {
+                    ai_agent_uuid: aiAgentUuid,
+                    is_ai_generated: false,
+                    message_type: 'user',
+                    web_agent_waiting_since: Date.now(),
+                } : {}),
                 attachments: optimisticAttachments.length > 0 ? optimisticAttachments : undefined,
             };
 
@@ -702,6 +747,33 @@ export function useMessages(conversationId: string | null) {
                     }
                 }
 
+                // Same contract as mobile: choose an agent only on initiation.
+                // Replies use the server thread root as parent, without retargeting.
+                if (aiAgentUuid === JARVIS_AGENT_UUID) {
+                    const sent = sendWsMessage({
+                        type: 'chat_message',
+                        conversation_uuid: conversationId,
+                        message: content,
+                        attachment_uuids: attachmentUuids,
+                        parent_message_uuid: parentMessageUuid || null,
+                        ai_agent_uuid: agentThread ? undefined : aiAgentUuid,
+                        client_message_id: tempUuid,
+                    });
+                    if (!sent) throw new Error('Connexion interrompue. Réessaie après la reconnexion.');
+                    // As on mobile, reconcile missed socket echoes from REST.
+                    const ownerUuid = user?.uuid;
+                    if (ownerUuid) {
+                        for (const delay of [1200, 4000]) {
+                            window.setTimeout(() => {
+                                void syncLatestMessagesForConversation(ownerUuid, conversationId)
+                                    .then(() => queryClient.invalidateQueries({ queryKey: ['messages', conversationId] }))
+                                    .catch(error => webLogger.warn('messages', 'Agent message reconciliation failed', { error: String(error) }));
+                            }, delay);
+                        }
+                    }
+                    return { tempUuid };
+                }
+
                 // Step 2: Send message payload
                 if (attachmentUuids.length > 0) {
                     res = await fetchWithAuth(
@@ -712,6 +784,7 @@ export function useMessages(conversationId: string | null) {
                             body: JSON.stringify({ 
                                 content, 
                                 parent_message_uuid: parentMessageUuid,
+                                client_message_id: tempUuid,
                                 attachment_uuids: attachmentUuids 
                             }),
                         }
@@ -722,7 +795,7 @@ export function useMessages(conversationId: string | null) {
                         {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ content, parent_message_uuid: parentMessageUuid }),
+                            body: JSON.stringify({ content, parent_message_uuid: parentMessageUuid, client_message_id: tempUuid }),
                         }
                     );
                 }
@@ -732,6 +805,31 @@ export function useMessages(conversationId: string | null) {
                 }
 
                 const payload = await res.json().catch(() => null);
+                if (payload && typeof payload === 'object' && aiAgentUuid && !agentThread) {
+                    payload.ai_agent_uuid = aiAgentUuid;
+                    payload.web_agent_waiting_since = optimisticMessage.web_agent_waiting_since;
+                }
+                if (payload?.uuid && agentThread && parentMessageUuid && user?.uuid) {
+                    // Register by confirmed UUID before any further async work:
+                    // socket echoes and REST syncs can race this confirmation.
+                    const root = payload.parent_message_uuid || parentMessageUuid;
+                    rememberThreadMessage(user.uuid, conversationId, String(payload.uuid), root);
+                    payload.parent_message_uuid = root;
+                    payload.web_agent_parent_uuid = root;
+                    payload.client_message_id = tempUuid;
+                }
+
+                // The mobile +/Agents action executes the selected framework
+                // agent explicitly. Persist the user's prompt first so the
+                // agent reads it in the conversation context.
+                if (aiAgentUuid && aiAgentUuid !== JARVIS_AGENT_UUID) {
+                    const triggered = sendWsMessage({
+                        type: 'trigger_framework_agent',
+                        agent_uuid: aiAgentUuid,
+                        conversation_uuid: conversationId,
+                    });
+                    if (!triggered) throw new Error('Le message a été envoyé, mais la connexion a été interrompue avant le lancement de l’agent.');
+                }
 
                 if (user?.uuid) {
                     if (payload && typeof payload === 'object' && 'uuid' in payload) {
@@ -773,6 +871,7 @@ export function useMessages(conversationId: string | null) {
                 return payload;
                 
             } catch (error) {
+                cancelExecution?.();
                 if (user?.uuid) {
                     await webDatabaseManager.updateMessageSyncStatus(tempUuid, user.uuid, 'failed');
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });

@@ -313,6 +313,27 @@
     filter: grayscale(1) opacity(0.72);
 }
 
+.wbb-selected-agent-avatar {
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    object-fit: cover;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .9);
+    box-sizing: border-box;
+}
+
+.wbb-selected-agent-avatar--fallback {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f0f2f0;
+    color: #55685a;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+
 .wbb-icon-btn--active .wbb-ai-watermark {
     opacity: 1;
     filter: none;
@@ -688,20 +709,6 @@
     width: 100%;
     text-align: center;
     font-size: 12px;
-}
-
-.wbb-selected-tool {
-    max-width: 110px;
-    padding: 4px 7px;
-    overflow: hidden;
-    color: #55615b;
-    font-size: 11px;
-    font-weight: 700;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
 }
 
 .wbb-recorder {

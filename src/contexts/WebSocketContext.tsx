@@ -4,15 +4,18 @@ import { useAuth } from './AuthContext';
 import { WS_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
+import { normalizeIncomingMessage } from '../utils/incomingMessage';
+import { syncLatestMessagesForConversation } from '../services/localSync';
+import { pendingAgentExecution, cancelAgentExecution } from '../services/agentThreadExecution';
 
 interface WebSocketContextType {
     isConnected: boolean;
-    sendWsMessage: (payload: object) => void;
+    sendWsMessage: (payload: object) => boolean;
 }
 
 const WebSocketContext = createContext<WebSocketContextType>({
     isConnected: false,
-    sendWsMessage: () => {},
+    sendWsMessage: () => false,
 });
 
 export function WebSocketProvider({ children }: { children: React.ReactNode }) {
@@ -50,11 +53,61 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
+                // Development trace: identifiers and shape only, never tokens or
+                // message text. Vite forwards warnings to the preview terminal.
+                if (import.meta.env.DEV) {
+                    const message = data.message && typeof data.message === 'object' ? data.message : data;
+                    console.warn('[EchoWeb:agent-trace] received', JSON.stringify({
+                        type: data.type,
+                        fields: Object.keys(data),
+                        conversation: data.conversation_uuid || message.conversation_uuid,
+                        uuid: message.uuid || data.message_uuid,
+                        parent: message.parent_message_uuid || data.parent_message_uuid,
+                        agent: message.framework_agent_uuid || message.ai_agent_uuid || data.agent_uuid,
+                        generated: message.is_ai_generated,
+                        contentLength: typeof message.content === 'string' ? message.content.length : undefined,
+                        success: data.success,
+                        error: data.error || data.detail,
+                    }));
+                }
 
-                if (data.type === 'chat_message') {
-                    const newMsg = data.message;
+                if (data.type === 'framework_agent_triggered' && user?.uuid) {
+                    const invocation = pendingAgentExecution(user.uuid, data.agent_uuid, data.conversation_uuid);
+                    const conversationUuid = data.conversation_uuid || invocation?.conversation;
+                    if (!conversationUuid) return;
+                    const ownerUuid = user.uuid;
+                    void (async () => {
+                        try {
+                            if (data.success === false) {
+                                cancelAgentExecution(ownerUuid, conversationUuid, data.agent_uuid);
+                                await webDatabaseManager.upsertMessage({
+                                    uuid: `agent-error-${crypto.randomUUID()}`,
+                                    conversation_uuid: conversationUuid,
+                                    content: `${data.agent_name || 'Agent'} : ${data.error || 'Impossible de générer une réponse.'}`,
+                                    message_type: 'system',
+                                    parent_message_uuid: invocation?.root,
+                                    created_at: new Date().toISOString(),
+                                }, ownerUuid);
+                                webLogger.warn('ws', 'Agent execution failed', { conversationUuid, error: data.error });
+                            } else {
+                                await syncLatestMessagesForConversation(ownerUuid, conversationUuid);
+                            }
+                        } catch (error) {
+                            webLogger.warn('ws', 'Agent execution synchronization failed', { error: String(error) });
+                        } finally {
+                            queryClient.invalidateQueries({ queryKey: ['messages', conversationUuid] });
+                        }
+                    })();
+                    return;
+                }
+
+                if (['chat_message', 'agent_message', 'message_updated'].includes(data.type)) {
+                    const newMsg = normalizeIncomingMessage(data);
                     const convUuid = newMsg?.conversation_uuid;
-                    if (!convUuid || !user?.uuid) return;
+                    if (!convUuid || !user?.uuid) {
+                        webLogger.warn('ws', 'Incomplete message event', { eventType: data.type, fields: Object.keys(data) });
+                        return;
+                    }
 
                     webLogger.info('ws', 'Received chat message event', {
                         userUuid: user.uuid,
@@ -118,9 +171,20 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
 
     const sendWsMessage = useCallback((payload: object) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
+            if (import.meta.env.DEV) {
+                const message = payload as Record<string, unknown>;
+                if (message.type === 'chat_message') console.warn('[EchoWeb:agent-trace] sent', JSON.stringify({
+                    conversation: message.conversation_uuid,
+                    agent: message.ai_agent_uuid,
+                    parent: message.parent_message_uuid,
+                    clientId: message.client_message_id,
+                }));
+            }
             webLogger.debug('ws', 'Sending websocket payload', { payload });
             wsRef.current.send(JSON.stringify(payload));
+            return true;
         }
+        return false;
     }, []);
 
     return (

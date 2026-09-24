@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
 import { useAuth } from '../contexts/AuthContext';
+import { normalizeAgentCatalog } from '../utils/agentCatalog';
 
 export interface Agent {
     uuid: string;
@@ -20,14 +21,7 @@ export interface Agent {
 }
 
 function normalizeAgents(data: any): Agent[] {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.results)) return data.results;
-    const combined = [...(data?.created_agents || []), ...(data?.favorite_agents || [])] as Agent[];
-    const unique = new Map<string, Agent>();
-    combined.forEach((agent) => {
-        if (agent.uuid) unique.set(agent.uuid, { ...unique.get(agent.uuid), ...agent });
-    });
-    return [...unique.values()];
+    return normalizeAgentCatalog<Agent>(data);
 }
 
 export function useAgentFramework() {

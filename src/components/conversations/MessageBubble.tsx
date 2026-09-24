@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { IoCheckmark, IoCheckmarkDone, IoChevronDown, IoChevronUp, IoDocumentTextOutline, IoTimeOutline, IoWarningOutline } from 'react-icons/io5';
+import { IoCheckmark, IoCheckmarkDone, IoChevronDown, IoChevronUp, IoDocumentTextOutline, IoPause, IoPlay, IoTimeOutline, IoWarningOutline } from 'react-icons/io5';
 import type { Message, InteractiveMessageData, FormField } from '../../hooks/useMessages';
 import { useAuth } from '../../contexts/AuthContext';
 import { fetchWithAuth } from '@web/services/apiClient';
@@ -89,12 +89,112 @@ interface MessageInfoEntry {
 }
 
 // ── Audio player ─────────────────────────────────────────────────────────────
-function AudioAttachment({ url, isMe }: { url: string; isMe: boolean }) {
+function AudioAttachment({ url, isMe, durationHint }: { url: string; isMe: boolean; durationHint?: number }) {
+    const audioRef = useRef<HTMLAudioElement>(null);
+    const [isPlaying, setIsPlaying] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [duration, setDuration] = useState(durationHint || 0);
+    const [position, setPosition] = useState(0);
+
+    useEffect(() => {
+        setIsPlaying(false);
+        setIsLoading(true);
+        setDuration(durationHint || 0);
+        setPosition(0);
+    }, [url, durationHint]);
+
+    const togglePlayback = async () => {
+        const audio = audioRef.current;
+        if (!audio || isLoading) return;
+        if (!audio.paused) {
+            audio.pause();
+            return;
+        }
+        if (audio.duration > 0 && audio.currentTime >= audio.duration) audio.currentTime = 0;
+        await audio.play().catch(() => setIsPlaying(false));
+    };
+
+    const formatTime = (seconds: number) => {
+        const safeSeconds = Number.isFinite(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+        return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, '0')}`;
+    };
+
+    const seekToPointer = (event: React.PointerEvent<HTMLButtonElement>) => {
+        event.stopPropagation();
+        const audio = audioRef.current;
+        if (!audio || duration <= 0) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+        const nextPosition = ratio * duration;
+        audio.currentTime = nextPosition;
+        setPosition(nextPosition);
+    };
+
+    const resolveMediaDuration = (audio: HTMLAudioElement) => {
+        if (Number.isFinite(audio.duration)) {
+            setDuration(audio.duration);
+            return;
+        }
+
+        // MediaRecorder WebM files may expose Infinity until the browser seeks
+        // once. This makes their real duration available without starting audio.
+        const restoreStart = () => {
+            audio.removeEventListener('timeupdate', restoreStart);
+            if (Number.isFinite(audio.duration)) setDuration(audio.duration);
+            audio.currentTime = 0;
+            setPosition(0);
+        };
+        audio.addEventListener('timeupdate', restoreStart);
+        audio.currentTime = Number.MAX_SAFE_INTEGER;
+    };
+
+    const progress = duration > 0 ? Math.max(0, Math.min(1, position / duration)) : 0;
+
     return (
         <div className={`attachment-audio ${isMe ? 'attachment-audio--mine' : 'attachment-audio--theirs'}`}>
-            <audio controls preload="none" style={{ maxWidth: '100%', height: 36 }}>
-                <source src={url} />
-            </audio>
+            <audio
+                ref={audioRef}
+                src={url}
+                preload="metadata"
+                onLoadedMetadata={(event) => {
+                    resolveMediaDuration(event.currentTarget);
+                    setIsLoading(false);
+                }}
+                onDurationChange={(event) => {
+                    if (Number.isFinite(event.currentTarget.duration)) setDuration(event.currentTarget.duration);
+                }}
+                onCanPlay={() => setIsLoading(false)}
+                onTimeUpdate={(event) => setPosition(event.currentTarget.currentTime)}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
+            />
+            <button
+                type="button"
+                className="attachment-audio__play"
+                onClick={(event) => {
+                    event.stopPropagation();
+                    void togglePlayback();
+                }}
+                disabled={isLoading || !url}
+                aria-label={isPlaying ? 'Mettre le vocal en pause' : 'Écouter le vocal'}
+            >
+                {isLoading ? <span className="attachment-audio__loader" /> : isPlaying ? <IoPause size={18} /> : <IoPlay size={18} />}
+            </button>
+            <div className="attachment-audio__body">
+                <button
+                    className="attachment-audio__progress"
+                    type="button"
+                    onPointerDown={seekToPointer}
+                    aria-label={`Position dans le message vocal : ${formatTime(position)} sur ${formatTime(duration)}`}
+                >
+                    <span className="attachment-audio__progress-fill" style={{ width: `${progress * 100}%` }} />
+                    <span className="attachment-audio__progress-thumb" style={{ left: `${progress * 100}%` }} />
+                </button>
+                <span className="attachment-audio__time">
+                    {formatTime(position)} / {formatTime(duration)}
+                </span>
+            </div>
         </div>
     );
 }
@@ -166,12 +266,17 @@ function getAttachmentRawType(attachment: MessageAttachment): string {
 
 function getAttachmentKind(attachment: MessageAttachment): 'image' | 'video' | 'audio' | 'document' {
     const rawType = getAttachmentRawType(attachment);
-    const fileIdentity = `${getAttachmentName(attachment)} ${getAttachmentUrl(attachment)}`
+    const attachmentName = getAttachmentName(attachment).toLowerCase();
+    const fileIdentity = `${attachmentName} ${getAttachmentUrl(attachment)}`
         .split(/[?#]/, 1)[0]
         .toLowerCase();
 
-    if (rawType.includes('video') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileIdentity)) return 'video';
-    if (rawType.includes('audio') || rawType.includes('voice') || /\.(mp3|m4a|aac|wav|ogg|opus)$/i.test(fileIdentity)) return 'audio';
+    // Web recordings commonly use an audio/webm container. Some backends infer
+    // "video" from the ambiguous .webm extension, so voice metadata wins first.
+    if (rawType.includes('audio') || rawType.includes('voice') || /^voice[_-]/i.test(attachmentName)) return 'audio';
+    if (rawType.includes('video')) return 'video';
+    if (/\.(mp3|m4a|aac|wav|ogg|opus)$/i.test(fileIdentity)) return 'audio';
+    if (/\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(fileIdentity)) return 'video';
     if (
         rawType.includes('image') ||
         rawType.includes('photo') ||
@@ -703,6 +808,24 @@ function MessageBubbleComponent({
                 style={ctxMenu ? { position: 'relative', zIndex: 9999 } : undefined}
             >
                 <div className={`message-content-row${isMe ? ' message-content-row--mine' : ''}`}>
+                    {isLastInGroup && (
+                        <div className={`message-meta ${isMe ? 'message-meta--mine' : 'message-meta--theirs'}`}>
+                            <span className="message-meta__time">{formattedTime}</span>
+                            {isMe && (
+                                <>
+                                    {message.isPending ? (
+                                        <span className="status-icon pending" aria-label="Envoi en cours"><IoTimeOutline size={12} /></span>
+                                    ) : message.sendError ? (
+                                        <span className="status-icon error" aria-label="Erreur d'envoi"><IoWarningOutline size={12} /></span>
+                                    ) : message.is_read ? (
+                                        <span className="status-icon read" aria-label="Vu"><IoCheckmarkDone size={13} /></span>
+                                    ) : (
+                                        <span className="status-icon delivered" aria-label="Distribué"><IoCheckmark size={12} /></span>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
                     <div
                         ref={bubbleRef}
                         className={`${bubbleClasses.join(' ')}${reactionEmojis && reactionEmojis.length > 0 ? ' has-reaction' : ''}${ctxMenu ? ' message-bubble--active' : ''}`}
@@ -726,7 +849,7 @@ function MessageBubbleComponent({
                                         {getAttachmentKind(att) === 'image' ? (
                                             <ImageAttachment attachment={att} />
                                         ) : getAttachmentKind(att) === 'audio' ? (
-                                            <AudioAttachment url={getAttachmentUrl(att)} isMe={!!isMe} />
+                                            <AudioAttachment url={getAttachmentUrl(att)} isMe={!!isMe} durationHint={att.duration} />
                                         ) : getAttachmentKind(att) === 'video' ? (
                                             <VideoAttachment url={getAttachmentUrl(att)} thumbnailUrl={getAttachmentThumbnailUrl(att)} />
                                         ) : (
@@ -762,24 +885,6 @@ function MessageBubbleComponent({
                             </div>
                         )}
 
-                        {isLastInGroup && (
-                            <div className={`message-meta ${isMe ? 'message-meta--mine' : 'message-meta--theirs'}`}>
-                                <span className="message-meta__time">{formattedTime}</span>
-                                {isMe && (
-                                    <>
-                                        {message.isPending ? (
-                                            <span className="status-icon pending" aria-label="Envoi en cours"><IoTimeOutline size={12} /></span>
-                                        ) : message.sendError ? (
-                                            <span className="status-icon error" aria-label="Erreur d'envoi"><IoWarningOutline size={12} /></span>
-                                        ) : message.is_read ? (
-                                            <span className="status-icon read" aria-label="Vu"><IoCheckmarkDone size={13} /></span>
-                                        ) : (
-                                            <span className="status-icon delivered" aria-label="Distribué"><IoCheckmark size={12} /></span>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-                        )}
                     </div>
                 </div>
             </div>

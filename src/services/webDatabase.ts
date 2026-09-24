@@ -1,4 +1,5 @@
 import { webLogger } from '../utils/logger';
+import { mergeThreadMessage, rememberThreadMessage } from './agentThreadExecution';
 
 type ConversationType = 'direct' | 'group' | 'agent';
 
@@ -463,6 +464,10 @@ export class WebDatabaseManager {
         const match = existingMessages.find((candidate) => {
             if (!candidate.is_pending) return false;
 
+            // The server may reparent the prompt into its newly-created thread.
+            // Prefer the echoed client ID over the original parent comparison.
+            if (message.raw.client_message_id === candidate.uuid && candidate.raw.sender_uuid === message.raw.sender_uuid) return true;
+
             const sameSender = candidate.raw.sender_uuid === message.raw.sender_uuid;
             const sameContent = candidate.raw.content === message.raw.content;
             const sameParent = (candidate.raw.parent_message_uuid ?? null) === (message.raw.parent_message_uuid ?? null);
@@ -471,14 +476,48 @@ export class WebDatabaseManager {
             return sameSender && sameContent && sameParent && closeInTime;
         });
 
-        return match?.id ?? null;
+        if (match) return match.id;
+        // Some REST-created socket echoes arrive before the HTTP confirmation,
+        // without either the client ID or parent. Only reconcile an unambiguous
+        // pending thread reply; never guess between two identical submissions.
+        if (message.raw.sender_uuid && !message.raw.parent_message_uuid && !message.raw.is_ai_generated) {
+            const candidates = existingMessages.filter(candidate => candidate.is_pending
+                && candidate.raw.web_agent_parent_uuid
+                && candidate.raw.sender_uuid === message.raw.sender_uuid
+                && candidate.raw.content === message.raw.content
+                && Math.abs(candidate.created_at_ms - message.created_at_ms) < 5 * 60 * 1000);
+            if (candidates.length === 1) return candidates[0].id;
+        }
+        return null;
     }
 
     async upsertMessage(message: Record<string, unknown>, ownerUuid: string): Promise<void> {
-        const record = this.buildMessageRecord(message, ownerUuid);
+        // Mobile message_updated events can contain only a parent or content.
+        // Preserve the rest of the stored message when applying those patches.
+        const readDb = await this.getDb();
+        const existing = await this.requestToPromise<StoredMessageRecord | undefined>(
+            readDb.transaction(MESSAGES_STORE, 'readonly').objectStore(MESSAGES_STORE).get(buildScopedId(ownerUuid, String(message.uuid || '')))
+        );
+        const merged = mergeThreadMessage(existing?.raw, message, ownerUuid);
+        const record = this.buildMessageRecord(merged, ownerUuid);
         if (!record.conversation_uuid) return;
 
         const pendingMatchId = await this.findMatchingPendingMessageId(ownerUuid, record);
+        const pending = pendingMatchId
+            ? await this.requestToPromise<StoredMessageRecord | undefined>(
+                readDb.transaction(MESSAGES_STORE, 'readonly').objectStore(MESSAGES_STORE).get(pendingMatchId)
+            ) : undefined;
+        // The HTTP/WS confirmation need not repeat the selected agent. Keep
+        // that local routing metadata across confirmation and later syncs.
+        const targetAgent = message.ai_agent_uuid || existing?.raw.ai_agent_uuid || pending?.raw.ai_agent_uuid;
+        if (targetAgent && !record.raw.is_ai_generated) record.raw.ai_agent_uuid = targetAgent;
+        if (!record.raw.is_ai_generated && pending?.raw.web_agent_waiting_since) {
+            record.raw.web_agent_waiting_since ??= pending.raw.web_agent_waiting_since;
+        }
+        if (pending?.raw.web_agent_parent_uuid) {
+            record.raw = mergeThreadMessage(pending.raw, record.raw, ownerUuid);
+            rememberThreadMessage(ownerUuid, record.conversation_uuid, record.uuid, String(record.raw.parent_message_uuid));
+        }
         const db = await this.getDb();
         const tx = db.transaction(MESSAGES_STORE, 'readwrite');
         const store = tx.objectStore(MESSAGES_STORE);

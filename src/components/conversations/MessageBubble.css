@@ -65,19 +65,26 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    margin-top: 6px;
+    flex: 0 0 auto;
+    margin-right: 7px;
+    /* The last bubble carries a 10px group margin; add its inner padding so
+       metadata sits beside the final text line rather than the bubble edge. */
+    margin-bottom: 18px;
     font-size: 10.5px;
     line-height: 1;
+    white-space: nowrap;
+    color: rgba(60, 60, 60, 0.45);
 }
 
 .message-meta--mine {
     justify-content: flex-end;
-    color: rgba(255, 255, 255, 0.76);
 }
 
 .message-meta--theirs {
+    order: 2;
     justify-content: flex-end;
-    color: rgba(60, 60, 60, 0.48);
+    margin-right: 0;
+    margin-left: 7px;
 }
 
 .message-meta__time {
@@ -615,11 +622,130 @@
 }
 
 /* ── Audio attachment ── */
-.attachment-audio audio {
-    display: block;
-    outline: none;
+.attachment-audio {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 220px;
+    padding: 2px 0;
 }
-.attachment-audio--mine audio { filter: brightness(1.1); }
+
+.attachment-audio audio {
+    display: none;
+}
+
+.attachment-audio__play {
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    cursor: pointer;
+    color: #0a9168;
+    background: rgba(10, 145, 104, 0.14);
+}
+
+.attachment-audio--mine .attachment-audio__play {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.16);
+}
+
+.attachment-audio__play:disabled {
+    cursor: default;
+}
+
+.attachment-audio__loader {
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: attachment-audio-spin 0.75s linear infinite;
+}
+
+.attachment-audio__body {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.attachment-audio__progress {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 4px;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 2px;
+    background: rgba(10, 145, 104, 0.2);
+    cursor: pointer;
+}
+
+.attachment-audio--mine .attachment-audio__progress {
+    background: rgba(255, 255, 255, 0.22);
+}
+
+.attachment-audio__progress::before {
+    content: '';
+    position: absolute;
+    inset: -7px 0;
+}
+
+.attachment-audio__progress-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: inherit;
+    background: #0a9168;
+    transition: width 80ms linear;
+}
+
+.attachment-audio--mine .attachment-audio__progress-fill {
+    background: #fff;
+}
+
+.attachment-audio__progress-thumb {
+    position: absolute;
+    top: 50%;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #0a9168;
+    transform: translate(-50%, -50%);
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+
+.attachment-audio--mine .attachment-audio__progress-thumb {
+    background: #fff;
+}
+
+.attachment-audio__progress:hover .attachment-audio__progress-thumb,
+.attachment-audio__progress:focus-visible .attachment-audio__progress-thumb {
+    opacity: 1;
+}
+
+.attachment-audio__time {
+    font-size: 10px;
+    line-height: 1.2;
+    font-weight: 500;
+    color: #666;
+}
+
+.attachment-audio--mine .attachment-audio__time {
+    color: rgba(255, 255, 255, 0.92);
+}
+
+@keyframes attachment-audio-spin {
+    to { transform: rotate(360deg); }
+}
 
 /* ── Video attachment ── */
 .attachment-video video {

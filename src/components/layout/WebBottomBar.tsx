@@ -1,12 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IoSend, IoAdd, IoMic, IoClose, IoConstructOutline, IoImage, IoDocument, IoHardwareChip, IoCodeSlash, IoChevronBack, IoCheckmark, IoPlay } from 'react-icons/io5';
+import { IoSend, IoAdd, IoMic, IoClose, IoImage, IoDocument, IoHardwareChip, IoCodeSlash, IoChevronBack, IoCheckmark, IoPlay } from 'react-icons/io5';
 import { useQuery } from '@tanstack/react-query';
 import { useJarvis } from '../../contexts/JarvisContext';
 import { useNavigation } from '../../contexts/NavigationContext';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
 import { enrichAgent, type BackendAgent, type ToolItem } from '../../data/toolsCatalog';
-import aiWatermark from '@web/assets/logo-watermark.png';
+import aiWatermark from '@web/assets/logo-watermark.png?inline';
+import { JARVIS_AGENT_UUID } from '@web/constants/jarvisAgent';
+import { normalizeAgentCatalog } from '@web/utils/agentCatalog';
 import './WebBottomBar.css';
 
 const getFirstNonEmptyLine = (text?: string): string => {
@@ -95,6 +97,14 @@ function formatRecordingTime(seconds: number) {
     return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
 
+function SelectedAgentAvatar({ agent }: { agent: ToolItem }) {
+    const [failed, setFailed] = useState(false);
+    const initials = agent.name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0] || '').join('').toUpperCase() || 'IA';
+    return agent.avatarUrl && !failed
+        ? <img src={agent.avatarUrl} alt="" className="wbb-selected-agent-avatar" onError={() => setFailed(true)} />
+        : <span className="wbb-selected-agent-avatar wbb-selected-agent-avatar--fallback" aria-hidden="true">{initials}</span>;
+}
+
 function ToolPicker({
     tools,
     selectedTool,
@@ -133,7 +143,6 @@ function ToolPicker({
 export default function WebBottomBar() {
     const {
         sendJarvisMessage,
-        sendJarvisInteraction,
         composerText,
         composerFocusKey,
         setComposerText,
@@ -147,6 +156,7 @@ export default function WebBottomBar() {
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
     const [toolPickerOpen, setToolPickerOpen] = useState(false);
     const [selectedTool, setSelectedTool] = useState<ToolItem | null>(null);
+    const startingAgentThread = jarvisMode && !replyTo?.isAgentThread;
     const [isRecording, setIsRecording] = useState(false);
     const [recordingSeconds, setRecordingSeconds] = useState(0);
     const [stagedVoice, setStagedVoice] = useState<{ file: File; url: string } | null>(null);
@@ -177,11 +187,7 @@ export default function WebBottomBar() {
             const res = await fetchWithAuth(`${API_BASE_URL}/framework/agents/`);
             if (!res.ok) return [];
             const data = await res.json();
-            const rawAgents: BackendAgent[] = Array.isArray(data)
-                ? data
-                : Array.isArray(data.results)
-                    ? data.results
-                    : [...(data.created_agents || []), ...(data.favorite_agents || [])];
+            const rawAgents = normalizeAgentCatalog<BackendAgent>(data);
             const unique = new Map<string, BackendAgent>();
             rawAgents.forEach((agent) => {
                 if (agent.uuid) unique.set(agent.uuid, { ...unique.get(agent.uuid), ...agent });
@@ -370,7 +376,7 @@ export default function WebBottomBar() {
             } catch (error) {
                 console.warn('Script execution unavailable', error);
             }
-            sendCallback.current.sendText(
+            await sendCallback.current.sendText(
                 buildCodeShareMessage(script, execution, inputParams, code),
                 replyTo?.uuid ?? null,
             );
@@ -390,50 +396,52 @@ export default function WebBottomBar() {
         sendLockRef.current = true;
         setIsSending(true);
 
+        // This invocation retains the submitted values in its closure. Reset
+        // the composer immediately, without later erasing the next draft.
+        if (isChat) setText('');
+        else setComposerText('');
+        setJarvisMode(false);
+        setReplyTo(null);
+        setSelectedTool(null);
+        setAttachmentMenuOpen(false);
+        setToolPickerOpen(false);
+        if (textareaRef.current) textareaRef.current.style.height = 'auto';
+
+        try {
         if (stagedVoice && !isChat) {
             await sendVoiceToJarvis(stagedVoice.file);
-        } else if (isChat && (jarvisMode || replyTo?.isAgentThread) && selectedConversation && effectiveText.trim()) {
-            await sendJarvisInteraction({
-                message: effectiveText.trim(),
-                mode: 'conversation_thread',
-                toolMode: selectedTool ? 'force' : 'auto',
-                conversationUuid: selectedConversation.uuid,
-                conversationName: selectedConversation.name,
-                conversationType: selectedConversation.conversation_type,
-                parentMessageUuid: replyTo?.uuid ?? null,
-                parentMessagePreview: replyTo ? getFirstNonEmptyLine(replyTo.content) : null,
-                preferredToolId: selectedTool?.name ?? null,
-                includeLocalUserMessage: !!replyTo?.isAgentThread,
-                jarvisThreadRootUuid: replyTo?.isAgentThread ? replyTo.uuid : null,
-            });
-            setReplyTo(null);
         } else if (isChat && sendCallback.current) {
+            const inAgentThread = !!replyTo?.isAgentThread;
+            const targetAgentUuid = inAgentThread ? replyTo?.aiAgentUuid || null : jarvisMode ? (selectedTool?.agentUuid || JARVIS_AGENT_UUID) : null;
             const filesToSend = stagedVoice ? [...stagedFiles, stagedVoice.file] : stagedFiles;
             if (filesToSend.length > 0) {
-                sendCallback.current.sendFiles(effectiveText.trim(), filesToSend, replyTo?.uuid ?? null);
+                await sendCallback.current.sendFiles(effectiveText.trim(), filesToSend, replyTo?.uuid ?? null, targetAgentUuid, inAgentThread);
             } else {
-                sendCallback.current.sendText(effectiveText.trim(), replyTo?.uuid ?? null);
+                await sendCallback.current.sendText(effectiveText.trim(), replyTo?.uuid ?? null, targetAgentUuid, inAgentThread);
             }
-            setReplyTo(null);
         } else if (!isChat) {
             if (effectiveText.trim()) await sendJarvisMessage(effectiveText.trim());
         }
 
-        if (isChat) setText('');
-        if (!isChat) setComposerText('');
         setStagedFiles([]);
         cancelStagedVoice();
-        setSelectedTool(null);
-        setAttachmentMenuOpen(false);
-        setToolPickerOpen(false);
-        if (textareaRef.current) {
-            textareaRef.current.style.height = 'auto';
-        }
 
+        } catch (error) {
+            if (isChat) {
+                // Preserve a newly typed draft; restore the failed submission
+                // only if the composer is still empty.
+                setText(current => current || effectiveText);
+                setJarvisMode(jarvisMode);
+                setSelectedTool(selectedTool);
+                setReplyTo(replyTo);
+            }
+            window.alert(error instanceof Error ? error.message : 'Impossible d’envoyer le message.');
+        } finally {
         window.setTimeout(() => {
             sendLockRef.current = false;
             setIsSending(false);
         }, 450);
+        }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -461,6 +469,7 @@ export default function WebBottomBar() {
     };
 
     const selectTool = (tool: ToolItem) => {
+        if (replyTo?.isAgentThread) setReplyTo(null);
         setSelectedTool(tool);
         setJarvisMode(true);
         setToolPickerOpen(false);
@@ -510,24 +519,31 @@ export default function WebBottomBar() {
                     </div>
                 )}
 
-                {/* Reply preview */}
-                {isChat && replyTo && (
+                {/* Reply / new agent thread preview */}
+                {isChat && (replyTo || startingAgentThread) && (
                     <div className="wbb-reply-preview">
                         <div className="wbb-reply-preview__text">
                             <span className="wbb-reply-preview__sender">
-                                {replyTo.isAgentThread ? 'Réponse dans le thread IA' : `Réponse à ${replyTo.sender_username || 'message'}`}
+                                {startingAgentThread
+                                    ? `Commencer un thread avec ${selectedTool?.name || 'Jarvis'}`
+                                    : replyTo?.isAgentThread ? 'Réponse dans le thread IA' : `Réponse à ${replyTo?.sender_username || 'message'}`}
                             </span>
-                            <span className="wbb-reply-preview__content">
+                            {!startingAgentThread && replyTo && <span className="wbb-reply-preview__content">
                                 {replyTo.isAgentThread
                                     ? "Ton prochain message sera envoyé à l’agent dans ce panel"
                                     : replyTo.attachments?.length ? '📎 Pièce jointe' : getFirstNonEmptyLine(replyTo.content)}
-                            </span>
+                            </span>}
                         </div>
                         <button
                             type="button"
                             className="wbb-reply-preview__close"
-                            onClick={() => setReplyTo(null)}
-                            aria-label="Annuler la réponse"
+                            onClick={() => {
+                                if (startingAgentThread) {
+                                    setJarvisMode(false);
+                                    setSelectedTool(null);
+                                } else setReplyTo(null);
+                            }}
+                            aria-label={startingAgentThread ? 'Annuler le nouveau thread' : 'Annuler la réponse'}
                         >
                             <IoClose size={14} />
                         </button>
@@ -586,22 +602,25 @@ export default function WebBottomBar() {
                     {isChat && (
                         <>
                             <button
+                                type="button"
                                 className={`wbb-icon-btn ${jarvisMode ? 'wbb-icon-btn--active' : ''}`}
-                                title="Demander a Jarvis dans ce fil"
+                                title={selectedTool && jarvisMode ? `Annuler la sélection de ${selectedTool.name}` : jarvisMode ? 'Désactiver Jarvis' : 'Parler à Jarvis dans ce fil'}
+                                aria-label={selectedTool && jarvisMode ? `Annuler la sélection de ${selectedTool.name}` : jarvisMode ? 'Désactiver Jarvis' : 'Parler à Jarvis dans ce fil'}
+                                aria-pressed={jarvisMode}
                                 onClick={() => {
                                     setAttachmentMenuOpen(false);
+                                    setToolPickerOpen(false);
                                     if (replyTo?.isAgentThread) setReplyTo(null);
-                                    setJarvisMode(value => !value);
+                                    setJarvisMode(value => selectedTool ? false : !value);
                                     setSelectedTool(null);
                                 }}
                             >
-                                <img
+                                {selectedTool && jarvisMode ? <SelectedAgentAvatar key={`${selectedTool.id}:${selectedTool.avatarUrl || ''}`} agent={selectedTool} /> : <img
                                     src={aiWatermark}
                                     alt=""
                                     className="wbb-ai-watermark"
-                                />
+                                />}
                             </button>
-                            {selectedTool && <span className="wbb-selected-tool" title={selectedTool.name}><IoConstructOutline size={13} />{selectedTool.name}</span>}
                         </>
                     )}
 
@@ -615,7 +634,7 @@ export default function WebBottomBar() {
                                 ? replyTo?.isAgentThread
                                     ? 'Répondre dans le thread IA'
                                     : jarvisMode
-                                    ? 'Parler à Jarvis'
+                                    ? `Parler à ${selectedTool?.name || 'Jarvis'}`
                                     : `Message pour ${selectedConversation.name || 'Conversation'}`
                                 : 'Parler à Jarvis'}
                             value={effectiveText}
