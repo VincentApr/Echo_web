@@ -8,6 +8,10 @@ import {
 } from 'react-icons/io5';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
+import { useNavigation } from '../contexts/NavigationContext';
+import { useAuth } from '../contexts/AuthContext';
+import { useConversations, type Conversation } from '../hooks/useConversations';
+import { webDatabaseManager } from '../services/webDatabase';
 import { TOOL_CATEGORIES, enrichAgent, getCategoryById, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
 import './MarketplacePage.css';
 
@@ -41,6 +45,11 @@ async function readError(response: Response, fallback: string): Promise<string> 
 
 export default function MarketplacePage() {
     const queryClient = useQueryClient();
+    const { openConversation } = useNavigation();
+    const { user } = useAuth();
+    const { agentConversations } = useConversations();
+    const [openingConversation, setOpeningConversation] = useState(false);
+    const openingConversationRef = useRef(false);
     const [view, setView] = useState<MarketplaceView>('catalog');
     const [search, setSearch] = useState('');
     const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -103,10 +112,52 @@ export default function MarketplacePage() {
     }, [activeCategory, agents, myAgents, search, view]);
 
     const closeDetails = useCallback(() => {
+        if (openingConversationRef.current) return;
         setSelectedAgent(null);
         setIsEditingAgent(false);
         setConfirmDelete(false);
     }, []);
+
+    const startConversation = async (agent: ToolItem) => {
+        if (openingConversationRef.current || agentActionPending) return;
+        openingConversationRef.current = true;
+        setOpeningConversation(true);
+        setCatalogError(null);
+        try {
+            let conversation = agentConversations.find(item => !item.is_archived && (
+                item.framework_agent?.uuid === agent.agentUuid || item.agent_info?.uuid === agent.agentUuid
+            ));
+            if (!conversation) {
+                const response = await fetchWithAuth(`${API_BASE_URL}/messaging/conversations/agents/create/`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ agent_uuid: agent.agentUuid }),
+                });
+                if (!response.ok) throw new Error(await readError(response, 'Impossible de commencer cette conversation.'));
+                const created = await response.json() as Partial<Conversation>;
+                if (!created.uuid) throw new Error('La conversation créée ne contient pas d’identifiant.');
+                conversation = {
+                    ...created,
+                    uuid: created.uuid,
+                    conversation_type: 'agent',
+                    unread_count: created.unread_count ?? 0,
+                    name: created.framework_agent?.name || created.agent_info?.name || agent.name,
+                    avatar_url: created.framework_agent?.avatar_url || created.agent_info?.avatar_url || agent.avatarUrl || '',
+                    framework_agent: created.framework_agent || { uuid: agent.agentUuid, name: agent.name, avatar_url: agent.avatarUrl || '' },
+                };
+                if (user?.uuid) await webDatabaseManager.upsertConversation(conversation as unknown as Record<string, unknown>, user.uuid);
+                await queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            }
+            openingConversationRef.current = false;
+            closeDetails();
+            openConversation(conversation);
+        } catch (error) {
+            setCatalogError(error instanceof Error ? error.message : 'Impossible de commencer cette conversation.');
+        } finally {
+            openingConversationRef.current = false;
+            setOpeningConversation(false);
+        }
+    };
 
     const openDetails = (agent: ToolItem) => {
         setSelectedAgent(agent);
@@ -343,7 +394,7 @@ export default function MarketplacePage() {
 
             {selectedAgent && <div className="agent-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetails(); }}>
                 <section className="agent-detail" role="dialog" aria-modal="true" aria-label={selectedAgent.name}>
-                    <button className="agent-detail__close" onClick={closeDetails}><IoClose size={18} /></button>
+                    <button className="agent-detail__close" disabled={openingConversation} onClick={closeDetails}><IoClose size={18} /></button>
                     <div className="agent-detail__icon"><AgentGlyph categoryId={selectedAgent.categoryId} /></div>
                     {view === 'mine' && isEditingAgent ? (
                         <div className="agent-detail__edit">
@@ -360,12 +411,17 @@ export default function MarketplacePage() {
                     )}
                     {catalogError && <div className="agent-detail__error">{catalogError}</div>}
                     {!isEditingAgent && <>
+                        <div className="agent-detail__actions">
                         <button className={`agent-detail__favorite ${selectedAgent.isFavorite ? 'is-favorite' : ''}`} disabled={favoritePending === selectedAgent.agentUuid} onClick={() => void toggleFavorite(selectedAgent)}>
                             {selectedAgent.isFavorite ? <IoStar size={19} /> : <IoStarOutline size={19} />}{favoritePending === selectedAgent.agentUuid ? 'Mise à jour…' : selectedAgent.isFavorite ? 'Retirer de mes favoris' : 'Ajouter à mes favoris'}
                         </button>
+                        <button type="button" className="agent-detail__start" disabled={openingConversation || agentActionPending} onClick={() => void startConversation(selectedAgent)}>
+                            <IoChatbubblesOutline size={19} />{openingConversation ? 'Ouverture…' : 'Commencer une conversation'}
+                        </button>
+                        </div>
                         <small className="agent-detail__hint">Les favoris apparaissent dans + → Agents au sein de vos conversations.</small>
                     </>}
-                    {view === 'mine' && !isEditingAgent && <div className="agent-detail__management">
+                    {view === 'mine' && !isEditingAgent && !openingConversation && <div className="agent-detail__management">
                         <button onClick={() => setIsEditingAgent(true)}><IoCreateOutline size={17} /><span>Modifier</span></button>
                         <button disabled={agentActionPending} onClick={() => void toggleVisibility()}>{selectedAgent.isPublic ? <IoLockClosedOutline size={17} /> : <IoGlobeOutline size={17} />}<span>{selectedAgent.isPublic ? 'Rendre privé' : 'Rendre public'}</span></button>
                         {!confirmDelete ? (
