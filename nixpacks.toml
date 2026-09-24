@@ -1,5 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "npm-10_x"]
+# Vite 8 / rolldown exigent Node >= 22.12 : le nixpkgs par défaut de Nixpacks ne fournit que 20.18 / 22.11.
+# Commit du canal nixos-25.05 (nodejs_22 = 22.20.0, npm 10 inclus).
+nixPkgs = ["nodejs_22"]
+nixpkgsArchive = "ac62194c3917d5f474c1a844b6fd6da2db95077d"
 
 [phases.install]
 cmds = ["npm ci"]
