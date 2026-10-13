@@ -11,10 +11,11 @@ import { normalizeAgentRenderPayload, normalizeRawAgentContentText } from '../..
 import { buildMessageReactionContent, extractReactionMapFromMessages, isReactionEventMessage } from '../../utils/messageReactions';
 import { isSystemMessage } from '../../utils/messageHelpers';
 import { JARVIS_AGENT_UUID } from '../../constants/jarvisAgent';
+import { isAgentMessage, isEmbeddedAgentRoot, findEmbeddedAgentRoot } from '../../utils/agentThreadDisplay';
 import { useQuery } from '@tanstack/react-query';
 import { fetchWithAuth } from '../../services/apiClient';
 import { API_BASE_URL } from '../../config/api';
-import { IoArrowForward, IoChevronBack, IoChevronForward, IoChevronDown, IoChevronUp, IoSparkles } from 'react-icons/io5';
+import { IoArrowForward, IoChevronBack, IoChevronForward, IoChevronDown, IoChevronUp } from 'react-icons/io5';
 import './ConversationThread.css';
 
 interface ConversationThreadProps {
@@ -24,21 +25,13 @@ interface ConversationThreadProps {
     conversationType?: 'direct' | 'group' | 'agent' | 'group_chat' | 'ai_agent';
 }
 
-// ── Helper: is this message from an AI agent? ──────────────────────────────
-function isAgentMessage(msg: Message): boolean {
-    return (
-        !!msg.is_agent_thread_root ||
-        !!msg.is_ai_generated ||
-        !!msg.framework_agent_name ||
-        !!msg.framework_agent_uuid ||
-        !!msg.agent_info?.name ||
-        !!msg.agent_info?.uuid ||
-        !!msg.ai_agent_name ||
-        !!msg.ai_agent_uuid
-        || !!msg.agent_uuid || !!msg.agent_name
-    );
+// Prepending can change the first message's grouping margin or sender label.
+// Anchor the visible content, not the outer row whose internal offset changes.
+function messageAnchorElement(element: HTMLElement): Element {
+    return element.querySelector('.message-text, .attachment-stack, .agent-card') || element;
 }
 
+// ── Helper: is this message from an AI agent? ──────────────────────────────
 function isJarvisLocalMessage(msg: Message): boolean {
     return msg.framework_agent_uuid === 'jarvis-local' || msg.agent_info?.uuid === 'jarvis-local';
 }
@@ -309,6 +302,8 @@ export function ConversationThread({
     const pendingHistoryAnchorRef = useRef<{ anchorUuid: string; offsetTop: number } | null>(null);
     const postHistoryResizeAnchorRef = useRef<{ anchorUuid: string; offsetTop: number; expiresAt: number } | null>(null);
     const historyLoadInFlightRef = useRef(false);
+    const historyResizeObserverRef = useRef<ResizeObserver | null>(null);
+    const [historyError, setHistoryError] = useState(false);
     const historyTopTriggerArmedRef = useRef(true);
     const lastHistoryLoadAtRef = useRef(0);
     const lastHistoryOldestUuidRef = useRef<string | null>(null);
@@ -334,27 +329,29 @@ export function ConversationThread({
     }, [sendMessage.mutateAsync]);
 
     const isGroupConversation = conversationType === 'group';
-    const isAgentConversation = conversationType === 'agent';
+    const isAgentConversation = conversationType === 'agent' || conversationType === 'ai_agent';
 
 
     useEffect(() => {
         registerSendCallback({
-            sendText: (text, parentMessageUuid, aiAgentUuid, agentThread) => {
+            sendText: (text, parentMessageUuid, aiAgentUuid, agentThread, clientMessageId) => {
                 return sendMutateRef.current({
                     aiAgentUuid,
                     agentThread,
                     conversationId,
                     content: text,
+                    clientMessageId,
                     parentMessageUuid: parentMessageUuid ?? replyToRef.current?.uuid,
                 });
             },
-            sendFiles: (text, files, parentMessageUuid, aiAgentUuid, agentThread) => {
+            sendFiles: (text, files, parentMessageUuid, aiAgentUuid, agentThread, clientMessageId) => {
                 return sendMutateRef.current({
                     aiAgentUuid,
                     agentThread,
                     conversationId,
                     content: text,
                     files,
+                    clientMessageId,
                     parentMessageUuid: parentMessageUuid ?? replyToRef.current?.uuid,
                 });
             },
@@ -370,6 +367,7 @@ export function ConversationThread({
         initialScrollDoneRef.current = false;
         shouldStickToBottomRef.current = true;
         pendingHistoryAnchorRef.current = null;
+        setHistoryError(false);
         postHistoryResizeAnchorRef.current = null;
         historyLoadInFlightRef.current = false;
         historyTopTriggerArmedRef.current = true;
@@ -429,7 +427,7 @@ export function ConversationThread({
             const element = messageElementByUuidRef.current.get(message.uuid);
             if (!element) continue;
 
-            const rect = element.getBoundingClientRect();
+            const rect = messageAnchorElement(element).getBoundingClientRect();
             if (rect.bottom <= containerRect.top) continue;
             if (rect.top >= containerRect.bottom) continue;
 
@@ -492,7 +490,7 @@ export function ConversationThread({
         void reason;
         const container = messagesContainerRef.current;
         if (!container) return;
-        if (!hasMore || isFetchingMore) return;
+        if (!hasMore || isFetchingMore || historyError) return;
         if (historyLoadInFlightRef.current) return;
         if (!historyTopTriggerArmedRef.current) return;
 
@@ -513,9 +511,15 @@ export function ConversationThread({
         lastHistoryOldestUuidRef.current = oldestRenderedMessageUuid;
         lastHistoryMessageCountRef.current = currentMessageCount;
 
-        loadMore()
+        loadMore({ cancelRefetch: false, throwOnError: true })
+            .then(result => {
+                if (!result.data?.pages.at(-1)?.messages.length) {
+                    pendingHistoryAnchorRef.current = null;
+                }
+            })
             .catch((error) => {
                 console.warn('Failed to load older messages:', error);
+                setHistoryError(true);
                 pendingHistoryAnchorRef.current = null;
                 historyTopTriggerArmedRef.current = true;
                 lastHistoryOldestUuidRef.current = null;
@@ -531,7 +535,7 @@ export function ConversationThread({
                     }
                 }, 80);
             });
-    }, [captureVisibleAnchor, hasMore, isFetchingMore, loadMore, oldestRenderedMessageUuid, orderedMessages.length]);
+    }, [captureVisibleAnchor, hasMore, isFetchingMore, historyError, loadMore, oldestRenderedMessageUuid, orderedMessages.length]);
 
     const maybeLoadOlderMessages = useCallback(() => {
         const container = messagesContainerRef.current;
@@ -549,6 +553,9 @@ export function ConversationThread({
     const handleMessagesScroll = useCallback(() => {
         const container = messagesContainerRef.current;
         if (!container) return;
+        if (historyLoadInFlightRef.current && pendingHistoryAnchorRef.current) {
+            pendingHistoryAnchorRef.current = captureVisibleAnchor();
+        }
 
         const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
         shouldStickToBottomRef.current = distanceToBottom < 96;
@@ -561,18 +568,21 @@ export function ConversationThread({
             triggerLoadOlderMessages('nearTop');
         }
         updateStickyDayLabel();
-    }, [triggerLoadOlderMessages, updateStickyDayLabel]);
+    }, [captureVisibleAnchor, triggerLoadOlderMessages, updateStickyDayLabel]);
 
     useLayoutEffect(() => {
         const container = messagesContainerRef.current;
         if (!container) return;
 
         if (pendingHistoryAnchorRef.current) {
+            // A loading-state render must not consume the anchor before the
+            // older page is actually inserted.
+            if (orderedMessages.length === lastHistoryMessageCountRef.current) return;
             const { anchorUuid, offsetTop } = pendingHistoryAnchorRef.current;
             const anchorElement = messageElementByUuidRef.current.get(anchorUuid);
             if (anchorElement) {
                 const containerRect = container.getBoundingClientRect();
-                const rect = anchorElement.getBoundingClientRect();
+                const rect = messageAnchorElement(anchorElement).getBoundingClientRect();
                 container.scrollTop += (rect.top - containerRect.top) - offsetTop;
             }
             pendingHistoryAnchorRef.current = null;
@@ -660,7 +670,7 @@ export function ConversationThread({
             if (!anchorElement) return;
 
             const containerRect = container.getBoundingClientRect();
-            const rect = anchorElement.getBoundingClientRect();
+            const rect = messageAnchorElement(anchorElement).getBoundingClientRect();
             const delta = (rect.top - containerRect.top) - anchor.offsetTop;
             if (delta === 0) return;
 
@@ -672,15 +682,22 @@ export function ConversationThread({
             };
         });
 
+        historyResizeObserverRef.current = observer;
         observer.observe(container);
-        return () => observer.disconnect();
+        messageElementByUuidRef.current.forEach(element => observer.observe(element));
+        return () => { observer.disconnect(); historyResizeObserverRef.current = null; };
     }, []);
 
     const registerMessageElement = useCallback((uuid: string, element: HTMLDivElement | null) => {
         if (element) {
+            const previous = messageElementByUuidRef.current.get(uuid);
+            if (previous && previous !== element) historyResizeObserverRef.current?.unobserve(previous);
             messageElementByUuidRef.current.set(uuid, element);
+            historyResizeObserverRef.current?.observe(element);
             return;
         }
+        const previous = messageElementByUuidRef.current.get(uuid);
+        if (previous) historyResizeObserverRef.current?.unobserve(previous);
         messageElementByUuidRef.current.delete(uuid);
     }, []);
 
@@ -733,16 +750,8 @@ export function ConversationThread({
         const byUuid = new Map(orderedMessages.map(message => [message.uuid, message]));
         const threads = new Map<string, Message[]>();
         const replyUuids = new Set<string>();
-        if (isAgentConversation) return { threads, replyUuids };
         for (const message of orderedMessages) {
-            let parent = byUuid.get(message.parent_message_uuid || message.jarvis_thread_root_uuid || '');
-            let root: Message | undefined;
-            const visited = new Set([message.uuid]);
-            while (parent && !visited.has(parent.uuid)) {
-                visited.add(parent.uuid);
-                if (isAgentMessage(parent)) root = parent;
-                parent = byUuid.get(parent.parent_message_uuid || '');
-            }
+            const root = findEmbeddedAgentRoot(message, byUuid, isAgentConversation);
             if (root) {
                 threads.set(root.uuid, [...(threads.get(root.uuid) || []), message]);
                 replyUuids.add(message.uuid);
@@ -751,7 +760,7 @@ export function ConversationThread({
         // Mobile compatibility: older manual invocations stored the initial
         // user prompt immediately before the agent root, without a parent.
         for (const root of orderedMessages) {
-            if (!isAgentMessage(root) || replyUuids.has(root.uuid)) continue;
+            if (!isEmbeddedAgentRoot(root, isAgentConversation) || replyUuids.has(root.uuid)) continue;
             const children = threads.get(root.uuid) || [];
             const rootTime = new Date(root.created_at).getTime();
             // Only an initial prompt already attached to the root replaces the
@@ -767,7 +776,8 @@ export function ConversationThread({
                 const targetUuid = candidate.ai_agent_uuid;
                 const rootAgentUuid = root.agent_info?.uuid || root.framework_agent_uuid || root.ai_agent_uuid || root.agent_uuid;
                 const isUserPrompt = !candidate.is_ai_generated && !candidate.is_agent_thread_root
-                    && (!isAgentMessage(candidate) || (!!targetUuid && targetUuid === rootAgentUuid));
+                    && (!isAgentMessage(candidate) || (!!targetUuid && targetUuid === rootAgentUuid))
+                    && (!isAgentConversation || isEmbeddedAgentRoot(candidate, true));
                 return isUserPrompt && !candidate.parent_message_uuid && !replyUuids.has(candidate.uuid)
                     && !!candidate.content?.trim() && elapsed >= 0 && elapsed <= 30_000;
             });
@@ -892,18 +902,26 @@ export function ConversationThread({
                 ref={messagesContainerRef}
                 className="thread-messages"
                 onScroll={handleMessagesScroll}
+                onWheel={() => { postHistoryResizeAnchorRef.current = null; }}
+                onTouchMove={() => { postHistoryResizeAnchorRef.current = null; }}
             >
                 <div ref={topHistorySentinelRef} className="thread-history-sentinel" aria-hidden="true" />
                 {isLoading && orderedMessages.length === 0 ? (
                     <div className="thread-loading">Chargement des messages...</div>
                 ) : (
                     <>
+                        <div className="thread-history-slot">
                         {isFetchingMore && (
-                            <div className="thread-history-loading">
-                                <IoSparkles className="thread-history-spinner" size={14} color="rgba(10, 145, 104, 0.8)" />
-                                Chargement de l&apos;historique...
+                            <div className="thread-history-loading" role="status" aria-label="Chargement des messages précédents">
+                                <span className="thread-history-spinner" aria-hidden="true" />
                             </div>
                         )}
+                        {historyError && <button className="thread-history-retry" onClick={() => {
+                            historyTopTriggerArmedRef.current = true;
+                            lastHistoryLoadAtRef.current = 0;
+                            setHistoryError(false);
+                        }}>Réessayer le chargement</button>}
+                        </div>
                         {orderedMessages.map((msg, index, arr) => {
                         if (agentReplyUuids.has(msg.uuid)) return null;
 
@@ -930,8 +948,8 @@ export function ConversationThread({
                                     <AgentCard
                                         msg={msg}
                                         threadMessages={threadMessages}
-                                        isAutoExpanded={isAgentConversation}
-                                        isAgentConversation={isAgentConversation}
+                                        isAutoExpanded={isAgentConversation && !isEmbeddedAgentRoot(msg, true)}
+                                        isAgentConversation={isAgentConversation && !isEmbeddedAgentRoot(msg, true)}
                                         onReply={setReplyTo}
                                     />
                                 </div>

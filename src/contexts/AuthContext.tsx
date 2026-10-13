@@ -4,10 +4,12 @@
 
 import { API_BASE_URL } from '@web/config/api';
 import { CURRENT_CGU_VERSION } from '@web/constants/cgu';
-import { fetchWithAuth, setLogoutCallback } from '@web/services/apiClient';
+import { fetchWithAuth, setLogoutCallback, getValidAccessToken, subscribeAccessToken } from '@web/services/apiClient';
 import { hasAcceptedCurrentCguLocally, markCurrentCguAcceptedLocally } from '@web/utils/cgu';
 import { cacheManager } from '@web/services/cacheManager';
 import { storage } from '@web/services/storage';
+import { clearComposerForOwner } from '../services/composerDrafts';
+import { useQueryClient } from '@tanstack/react-query';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
 import React, { createContext, useContext, useEffect, useState } from 'react';
@@ -108,6 +110,7 @@ const readErrorMessage = (data: unknown, fallback: string): string => {
 
 // ── Provider ──
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+    const queryClient = useQueryClient();
     const [user, setUser] = useState<User | null>(null);
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [needsCguAcceptance, setNeedsCguAcceptance] = useState(false);
@@ -116,6 +119,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     // Init: restore session from localStorage
     useEffect(() => {
+        const unsubscribeToken = subscribeAccessToken(setAccessToken);
         const initAuth = async () => {
             try {
                 webLogger.info('auth', 'Initializing web auth session');
@@ -127,12 +131,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                     storage.getItemAsync('refreshToken'),
                 ]);
 
-                if (storedUser && storedAccess && storedRefresh) {
+                if (storedUser && storedRefresh) {
                     let resolvedUser = JSON.parse(storedUser) as User;
+                    let restoredAccess = storedAccess;
+                    try {
+                        restoredAccess = await getValidAccessToken();
+                        if (!restoredAccess) return;
+                    } catch (error) {
+                        // Keep the cached session offline; a later request retries renewal.
+                        webLogger.warn('auth', 'Session renewal temporarily unavailable', { error: String(error) });
+                    }
                     await webDatabaseManager.initialize();
                     await webDatabaseManager.logSnapshot();
                     setUser(resolvedUser);
-                    setAccessToken(storedAccess);
+                    setAccessToken(restoredAccess);
                     webLogger.info('auth', 'Restored stored session', {
                         userUuid: resolvedUser?.uuid ?? null,
                         username: resolvedUser?.username ?? null,
@@ -141,9 +153,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                     // Self-heal: fetch profile if UUID missing
                     if (!resolvedUser?.uuid) {
                         try {
-                            const res = await fetch(`${API_BASE_URL}/api/auth/profile/`, {
-                                headers: { Authorization: `Bearer ${storedAccess}` },
-                            });
+                            const res = await fetchWithAuth(`${API_BASE_URL}/api/auth/profile/`);
                             if (res.ok) {
                                 const fresh = await res.json();
                                 if (fresh?.uuid) {
@@ -179,6 +189,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
         };
         initAuth();
+        return () => { unsubscribeToken(); setLogoutCallback(null); };
     }, []);
 
     const refreshCguAcceptanceStatus = async (targetUser?: User | null): Promise<boolean> => {
@@ -231,14 +242,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
                 } catch { /* best effort */ }
             }
 
-            await cacheManager.clear();
-            await webDatabaseManager.clearAllData();
             setUser(null);
             setAccessToken(null);
             setNeedsCguAcceptance(false);
             await storage.deleteItemAsync('accessToken');
             await storage.deleteItemAsync('refreshToken');
             await storage.deleteItemAsync('user');
+            await queryClient.cancelQueries();
+            queryClient.clear();
+            if (callApi && user?.uuid) clearComposerForOwner(user.uuid);
+            // Cache cleanup must never prevent an explicit logout from persisting.
+            await cacheManager.clear();
+            await webDatabaseManager.clearAllData();
         } finally {
             isLoggingOutRef.current = false;
         }

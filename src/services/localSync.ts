@@ -20,20 +20,19 @@ function normalizePaginationUrl(nextUrl: string | null | undefined): string | nu
     if (!nextUrl) return null;
 
     try {
-        const parsed = new URL(nextUrl, window.location.origin);
+        const parsed = new URL(nextUrl, API_BASE_URL || window.location.origin);
 
         if (!API_BASE_URL) {
             return `${parsed.pathname}${parsed.search}${parsed.hash}`;
         }
 
         const apiOrigin = new URL(API_BASE_URL, window.location.origin).origin;
-        if (parsed.origin === apiOrigin) {
-            return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        if (parsed.origin === apiOrigin || parsed.origin === window.location.origin) {
+            return `${API_BASE_URL}${parsed.pathname}${parsed.search}${parsed.hash}`;
         }
-
-        return parsed.toString();
+        throw new Error('Unexpected pagination origin');
     } catch {
-        return nextUrl;
+        throw new Error('Adresse de pagination invalide.');
     }
 }
 
@@ -191,10 +190,12 @@ async function fetchMessagesPage(url: string): Promise<SyncMessagesResult> {
     return result;
 }
 
+export const MESSAGE_PAGE_SIZE = 30;
+
 export async function syncLatestMessagesForConversation(
     ownerUuid: string,
     conversationUuid: string,
-    pageLimit: number = 50
+    pageLimit: number = MESSAGE_PAGE_SIZE
 ): Promise<void> {
     const key = `${ownerUuid}:${conversationUuid}`;
     const existingSync = latestMessagesSyncInFlight.get(key);
@@ -298,7 +299,7 @@ export async function syncNewerMessagesForConversation(
 
         let url = `${API_BASE_URL}/messaging/conversations/${conversationUuid}/messages/?limit=${pageLimit}&ordering=-created_at`;
         if (newestLocalTimestamp) {
-            const afterDate = new Date(newestLocalTimestamp + 1).toISOString();
+            const afterDate = new Date(newestLocalTimestamp - 1000).toISOString();
             url += `&created_after=${encodeURIComponent(afterDate)}&created_at__gt=${encodeURIComponent(afterDate)}`;
         }
 
@@ -311,25 +312,31 @@ export async function syncNewerMessagesForConversation(
             localCount,
         });
 
-        const { messages } = await fetchMessagesPage(url);
         const knownMessageUuids = new Set(await webDatabaseManager.getMessageUuids(conversationUuid, ownerUuid));
-        const trulyNewMessages = messages
-            .filter((message) => {
+        const recovered = new Map<string, Record<string, unknown>>();
+        const visited = new Set<string>();
+        let nextUrl: string | null = url;
+        while (nextUrl) {
+            if (visited.has(nextUrl) || visited.size >= 100) throw new Error('Rattrapage incomplet : pagination interrompue.');
+            visited.add(nextUrl);
+            const page = await fetchMessagesPage(nextUrl);
+            for (const message of page.messages) {
                 const uuid = String(message.uuid || '');
-                if (!uuid || knownMessageUuids.has(uuid)) return false;
-                if (newestLocalTimestamp) {
-                    const createdAtMs = toEpochMs(message.created_at);
-                    if (createdAtMs <= newestLocalTimestamp) return false;
-                }
-                return true;
-            })
-            .map((message) => ({
-                conversation_uuid: conversationUuid,
-                ...message,
-            }));
+                if (uuid) recovered.set(uuid, { ...message, conversation_uuid: conversationUuid });
+            }
+            // The existing endpoint requests descending chronological order.
+            // Stop at the overlap only when there is an existing confirmed message.
+            const reachedKnownHistory = newestLocalTimestamp !== null && page.messages.some(message =>
+                toEpochMs(message.created_at) < newestLocalTimestamp - 1000);
+            nextUrl = reachedKnownHistory ? null : page.nextPageUrl;
+        }
+        // Persist only after all pages succeeded, so a partial fetch cannot
+        // advance the watermark and make the missing intermediate pages invisible.
+        const recoveredMessages = [...recovered.values()];
+        const insertedCount = recoveredMessages.filter(message => !knownMessageUuids.has(String(message.uuid))).length;
 
-        if (trulyNewMessages.length > 0) {
-            await webDatabaseManager.upsertMessages(trulyNewMessages, ownerUuid);
+        if (recoveredMessages.length > 0) {
+            await webDatabaseManager.upsertMessages(recoveredMessages, ownerUuid);
         }
 
         await webDatabaseManager.setSyncState(
@@ -341,11 +348,11 @@ export async function syncNewerMessagesForConversation(
         webLogger.info('sync', 'Completed incremental messages sync', {
             ownerUuid,
             conversationUuid,
-            insertedCount: trulyNewMessages.length,
+            insertedCount,
             localCountBeforeSync: localCount,
         });
 
-        return trulyNewMessages.length;
+        return insertedCount;
     })().finally(() => {
         incrementalMessagesSyncInFlight.delete(key);
     });
@@ -366,7 +373,11 @@ export async function fetchOlderMessagesPageAndPersist(
         pageUrl,
     });
 
-    const { messages, nextPageUrl } = await fetchMessagesPage(pageUrl);
+    // Offset cursors remain valid when reducing their page size. Do not alter
+    // page-number/opaque cursors: changing their size could skip messages.
+    const boundedUrl = new URL(pageUrl, API_BASE_URL || window.location.origin);
+    if (boundedUrl.searchParams.has('offset')) boundedUrl.searchParams.set('limit', String(MESSAGE_PAGE_SIZE));
+    const { messages, nextPageUrl } = await fetchMessagesPage(normalizePaginationUrl(boundedUrl.toString())!);
     const withConversationUuid = messages.map((message) => ({
         conversation_uuid: conversationUuid,
         ...message,
@@ -392,7 +403,7 @@ export async function fetchOlderMessagesPageByOffsetAndPersist(
     ownerUuid: string,
     conversationUuid: string,
     offset: number,
-    pageLimit: number = 50
+    pageLimit: number = MESSAGE_PAGE_SIZE
 ): Promise<SyncMessagesResult> {
     await webDatabaseManager.initialize();
 

@@ -15,7 +15,7 @@ const PAGES_WITH_PANEL: PageId[] = ['conversations', 'groups', 'agents', 'add-fr
 
 export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const { user, isLoggedIn, logout } = useAuth();
-  const { currentPage, navigate, isSidebarPanelOpen, conversationView } = useNavigation();
+  const { currentPage, navigate, isSidebarPanelOpen, conversationView, selectedConversation } = useNavigation();
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [savedPanelWidth, setSavedPanelWidth] = useState(() => {
     const stored = Number(localStorage.getItem('echo:sidebar-panel-width'));
@@ -68,7 +68,7 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
             {children(currentPage)}
           </main>
 
-          {conversationView !== 'management' && !isImmersivePage && <WebBottomBar />}
+          {conversationView !== 'management' && !isImmersivePage && <WebBottomBar key={`${user?.uuid || 'guest'}:${selectedConversation?.uuid || 'home'}`} />}
         </div>
       </div>
     </div>

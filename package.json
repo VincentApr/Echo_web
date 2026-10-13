@@ -9,7 +9,12 @@
   "scripts": {
     "dev": "vite",
     "check:independence": "node scripts/check-web-independence.mjs",
-    "test:agent-threads": "node scripts/test-agent-thread-execution.mjs",
+    "test:agent-threads": "node scripts/test-agent-thread-execution.mjs && node scripts/test-agent-thread-display.mjs",
+    "test:auth": "node scripts/test-auth-session.mjs",
+    "test:composer": "node scripts/test-composer-drafts.mjs",
+    "test:sync": "node scripts/test-message-sync.mjs",
+    "test": "npm run test:auth && npm run test:composer && npm run test:sync && npm run test:agent-threads",
+    "test:e2e": "playwright test",
     "prebuild": "npm run check:independence",
     "build": "tsc -b && vite build",
     "start": "node server.js",
@@ -28,6 +33,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.63.0",
     "@types/node": "^24.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

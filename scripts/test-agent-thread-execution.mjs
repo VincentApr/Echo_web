@@ -75,6 +75,7 @@ const dbJs = ts.transpileModule(dbSource, { compilerOptions: { module: ts.Module
 const dbExports = {};
 new Function('exports', 'require', dbJs)(dbExports, name => {
     if (name === './agentThreadExecution') return execution;
+    if (name === './composerDrafts') return { completeSend() {} };
     if (name === '../utils/logger') return { webLogger: {} };
     throw new Error(`Unexpected dependency: ${name}`);
 });
@@ -95,3 +96,9 @@ db.getAllByIndex = async () => [pendingReply];
 assert.equal(await db.findMatchingPendingMessageId('owner', { ...earlyEcho, raw: { ...earlyEcho.raw, sender_uuid: 'someone-else' } }), null);
 assert.equal(await db.findMatchingPendingMessageId('owner', { ...earlyEcho, raw: { ...earlyEcho.raw, is_ai_generated: true } }), null);
 console.log('Early socket echo reconciliation and thread loading checks passed.');
+db.getAllByIndex = async () => [
+    { uuid: 'server-message', sync_status: 'synced', created_at_ms: now },
+    { uuid: 'temp-pending', sync_status: 'pending', created_at_ms: now + 1000 },
+    { uuid: 'temp-failed', sync_status: 'failed', created_at_ms: now + 2000 },
+];
+assert.equal(await db.getNewestMessageTimestamp('conv', 'owner'), now, 'local drafts must not hide server messages missed offline');

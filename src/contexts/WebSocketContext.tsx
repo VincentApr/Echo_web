@@ -5,16 +5,21 @@ import { WS_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
 import { normalizeIncomingMessage } from '../utils/incomingMessage';
-import { syncLatestMessagesForConversation } from '../services/localSync';
+import { syncLatestMessagesForConversation, syncConversationsByType } from '../services/localSync';
+import { getValidAccessToken } from '../services/apiClient';
 import { pendingAgentExecution, cancelAgentExecution } from '../services/agentThreadExecution';
 
 interface WebSocketContextType {
     isConnected: boolean;
+    isOnline: boolean;
+    connectionVersion: number;
     sendWsMessage: (payload: object) => boolean;
 }
 
 const WebSocketContext = createContext<WebSocketContextType>({
     isConnected: false,
+    isOnline: true,
+    connectionVersion: 0,
     sendWsMessage: () => false,
 });
 
@@ -24,9 +29,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     const wsRef = useRef<WebSocket | null>(null);
     const reconnectTimeoutRef = useRef<number | null>(null);
     const [isConnected, setIsConnected] = useState(false);
+    const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const [connectionVersion, setConnectionVersion] = useState(0);
+    const generationRef = useRef(0);
+    const connectingRef = useRef(false);
+    const retryAttemptRef = useRef(0);
 
-    const connect = useCallback(() => {
-        if (!user || !accessToken) return;
+    const connect = useCallback(async () => {
+        if (!user || !accessToken || !navigator.onLine || connectingRef.current) return;
         // Already open or connecting
         if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) return;
 
@@ -36,14 +46,34 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             userUuid: user.uuid,
         });
 
-        const ws = new WebSocket(wsUrl, ['access_token', accessToken]);
+        const generation = generationRef.current;
+        connectingRef.current = true;
+        let token: string | null;
+        try { token = await getValidAccessToken(); }
+        catch {
+            if (generation === generationRef.current) {
+                connectingRef.current = false;
+                reconnectTimeoutRef.current = window.setTimeout(() => void connect(), 5000);
+            }
+            return;
+        }
+        if (generation !== generationRef.current) return;
+        connectingRef.current = false;
+        if (!token || !navigator.onLine) return;
+        const ws = new WebSocket(wsUrl, ['access_token', token]);
         wsRef.current = ws;
 
         ws.onopen = () => {
+            if (wsRef.current !== ws) return;
             webLogger.info('ws', 'Websocket connected', {
                 userUuid: user.uuid,
             });
             setIsConnected(true);
+            retryAttemptRef.current = 0;
+            setConnectionVersion(version => version + 1);
+            // Reload sidebar data from the server, not only from IndexedDB.
+            void Promise.allSettled((['private', 'group', 'agent'] as const).map(type => syncConversationsByType(user.uuid, type)))
+                .then(() => { if (wsRef.current === ws) void queryClient.invalidateQueries({ queryKey: ['conversations'] }); });
             if (reconnectTimeoutRef.current) {
                 clearTimeout(reconnectTimeoutRef.current);
                 reconnectTimeoutRef.current = null;
@@ -51,6 +81,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         };
 
         ws.onmessage = (event) => {
+            if (wsRef.current !== ws) return;
             try {
                 const data = JSON.parse(event.data);
                 // Development trace: identifiers and shape only, never tokens or
@@ -139,13 +170,15 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
         };
 
         ws.onclose = () => {
+            if (wsRef.current !== ws) return;
             webLogger.warn('ws', 'Websocket closed, scheduling reconnect', {
                 userUuid: user.uuid,
                 retryInMs: 3000,
             });
             setIsConnected(false);
-            if (wsRef.current === ws) {
-                reconnectTimeoutRef.current = window.setTimeout(connect, 3000);
+            if (navigator.onLine) {
+                const delay = Math.min(30_000, 1000 * 2 ** retryAttemptRef.current++);
+                reconnectTimeoutRef.current = window.setTimeout(() => void connect(), delay);
             }
         };
 
@@ -157,10 +190,22 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
     }, [user, accessToken, queryClient]);
 
     useEffect(() => {
+        const online = () => { setIsOnline(true); void connect(); };
+        const offline = () => {
+            setIsOnline(false); setIsConnected(false);
+            if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+            wsRef.current?.close();
+        };
+        window.addEventListener('online', online);
+        window.addEventListener('offline', offline);
         if (user && accessToken) {
             connect();
         }
         return () => {
+            generationRef.current++;
+            connectingRef.current = false;
+            window.removeEventListener('online', online);
+            window.removeEventListener('offline', offline);
             if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
             const ws = wsRef.current;
             wsRef.current = null;
@@ -181,14 +226,14 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
                 }));
             }
             webLogger.debug('ws', 'Sending websocket payload', { payload });
-            wsRef.current.send(JSON.stringify(payload));
-            return true;
+            try { wsRef.current.send(JSON.stringify(payload)); return true; }
+            catch { return false; }
         }
         return false;
     }, []);
 
     return (
-        <WebSocketContext.Provider value={{ isConnected, sendWsMessage }}>
+        <WebSocketContext.Provider value={{ isConnected, isOnline, connectionVersion, sendWsMessage }}>
             {children}
         </WebSocketContext.Provider>
     );

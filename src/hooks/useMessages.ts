@@ -4,10 +4,11 @@ import { useAuth } from '../contexts/AuthContext';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
 import { webDatabaseManager } from '../services/webDatabase';
-import { fetchOlderMessagesPageAndPersist, fetchOlderMessagesPageByOffsetAndPersist, hydrateConversationHistoryFromDetail, syncLatestMessagesForConversation, syncNewerMessagesForConversation } from '../services/localSync';
+import { MESSAGE_PAGE_SIZE, fetchOlderMessagesPageAndPersist, fetchOlderMessagesPageByOffsetAndPersist, syncLatestMessagesForConversation, syncNewerMessagesForConversation } from '../services/localSync';
 import { webLogger } from '../utils/logger';
 import { useWebSocketContext } from '../contexts/WebSocketContext';
 import { JARVIS_AGENT_UUID } from '../constants/jarvisAgent';
+import { MessageDeliveryError } from '../services/messageDelivery';
 import { reserveAgentExecution, pendingAgentExecution, rememberThreadMessage } from '../services/agentThreadExecution';
 
 type BackgroundMessageSyncResult = {
@@ -95,6 +96,7 @@ export interface Message {
 }
 
 interface SendMessageParams {
+    clientMessageId?: string;
     conversationId: string;
     content: string;
     parentMessageUuid?: string | null;
@@ -195,7 +197,7 @@ async function fetchMessagesDirectly(url: string, conversationUuid: string): Pro
 }
 
 export function useMessages(conversationId: string | null) {
-    const { sendWsMessage, isConnected } = useWebSocketContext();
+    const { sendWsMessage, isConnected, connectionVersion } = useWebSocketContext();
     const { user, updateUser } = useAuth();
     const queryClient = useQueryClient();
     const historyBootstrapAttemptedRef = useRef(false);
@@ -234,7 +236,7 @@ export function useMessages(conversationId: string | null) {
             !historyBootstrapAttemptedRef.current &&
             (
                 !syncState ||
-                (!syncState.next_page_url && pageMessages.length >= 50)
+                (!syncState.next_page_url && pageMessages.length >= MESSAGE_PAGE_SIZE)
             );
 
         const cursor: MessagesCursor = shouldAttemptBootstrapHistory
@@ -269,7 +271,7 @@ export function useMessages(conversationId: string | null) {
         });
 
         if (pageParam === null) {
-            const localPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, { limit: 50 });
+            const localPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, { limit: MESSAGE_PAGE_SIZE });
             if (localPage.messages.length > 0) {
                 const messages = localPage.messages as unknown as Message[];
                 webLogger.info('messages', 'Loaded first page from local database', {
@@ -290,7 +292,7 @@ export function useMessages(conversationId: string | null) {
                     conversationUuid: conversationId,
                 });
                 await syncLatestMessagesForConversation(user.uuid, conversationId);
-                const hydratedPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, { limit: 50 });
+                const hydratedPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, { limit: MESSAGE_PAGE_SIZE });
                 const messages = hydratedPage.messages as unknown as Message[];
 
                 if (messages.length > 0) {
@@ -314,7 +316,7 @@ export function useMessages(conversationId: string | null) {
             }
 
             const directPage = await fetchMessagesDirectly(
-                `${API_BASE_URL}/messaging/conversations/${conversationId}/messages/?limit=50&ordering=-created_at`,
+                `${API_BASE_URL}/messaging/conversations/${conversationId}/messages/?limit=${MESSAGE_PAGE_SIZE}&ordering=-created_at`,
                 conversationId
             );
 
@@ -344,7 +346,7 @@ export function useMessages(conversationId: string | null) {
 
         if (pageParam.kind === 'local') {
             const localPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, {
-                limit: 50,
+                limit: MESSAGE_PAGE_SIZE,
                 beforeCreatedAtMs: pageParam.beforeCreatedAtMs,
                 beforeUuid: pageParam.beforeUuid,
             });
@@ -410,7 +412,7 @@ export function useMessages(conversationId: string | null) {
                         user.uuid,
                         conversationId,
                         localCount,
-                        50
+                        MESSAGE_PAGE_SIZE
                     );
                     const offsetMessages = offsetPage.messages as unknown as Message[];
                     const newUniqueMessages = offsetMessages.filter((message) => {
@@ -420,7 +422,7 @@ export function useMessages(conversationId: string | null) {
 
                     if (newUniqueMessages.length > 0) {
                         const localPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, {
-                            limit: 50,
+                            limit: MESSAGE_PAGE_SIZE,
                             beforeCreatedAtMs: pageParam.beforeCreatedAtMs,
                             beforeUuid: pageParam.beforeUuid,
                         });
@@ -441,31 +443,17 @@ export function useMessages(conversationId: string | null) {
                     }
                 }
 
-                const hydratedCount = await hydrateConversationHistoryFromDetail(user.uuid, conversationId);
-                const localPage = await webDatabaseManager.getMessagesPage(conversationId, user.uuid, {
-                    limit: 50,
-                    beforeCreatedAtMs: pageParam.beforeCreatedAtMs,
-                    beforeUuid: pageParam.beforeUuid,
-                });
-
-                const messages = localPage.messages as unknown as Message[];
-                webLogger.info('messages', 'Loaded older page after conversation detail hydration', {
-                    ownerUuid: user.uuid,
-                    conversationUuid: conversationId,
-                    hydratedCount,
-                    count: messages.length,
-                    hasMoreLocal: localPage.hasMoreLocal,
-                });
-                return {
-                    messages,
-                    nextCursor: await buildNextCursor(user.uuid, messages, localPage.hasMoreLocal),
-                };
+                // Never fall back to the detail endpoint here: it can return
+                // the whole history and block a small incremental load.
+                const state = await webDatabaseManager.getSyncState(conversationId, user.uuid);
+                return { messages: [], nextCursor: state?.next_page_url
+                    ? { kind: 'remote', url: state.next_page_url } : null };
             }
 
             const knownMessageUuids = new Set(await webDatabaseManager.getMessageUuids(conversationId, user.uuid));
             let currentRemoteUrl = pageParam.url;
             let duplicateOnlyPageCount = 0;
-            const maxDuplicateOnlyPages = 10;
+            const maxDuplicateOnlyPages = 1;
 
             while (true) {
                 const remotePage = await fetchOlderMessagesPageAndPersist(user.uuid, conversationId, currentRemoteUrl);
@@ -487,8 +475,10 @@ export function useMessages(conversationId: string | null) {
                         nextPageUrl: remotePage.nextPageUrl,
                     });
                     return {
-                        messages: newUniqueMessages.length > 0 ? messages : [],
-                        nextCursor: remotePage.nextPageUrl ? { kind: 'remote', url: remotePage.nextPageUrl } : null,
+                        messages: newUniqueMessages.slice(0, MESSAGE_PAGE_SIZE),
+                        nextCursor: newUniqueMessages.length > MESSAGE_PAGE_SIZE
+                            ? await buildNextCursor(user.uuid, newUniqueMessages.slice(0, MESSAGE_PAGE_SIZE), true)
+                            : remotePage.nextPageUrl ? { kind: 'remote', url: remotePage.nextPageUrl } : null,
                     };
                 }
 
@@ -639,8 +629,32 @@ export function useMessages(conversationId: string | null) {
         };
     }, [conversationId, queryClient, user?.uuid]);
 
+    useEffect(() => {
+        if (!conversationId || !user?.uuid) return;
+        let active = true;
+        const reconcile = () => {
+            if (!navigator.onLine || document.visibilityState === 'hidden') return;
+            void syncNewerMessagesForConversation(user.uuid, conversationId, { force: true })
+                .then(() => { if (active) void queryClient.invalidateQueries({ queryKey: ['messages', conversationId] }); })
+                .catch(error => webLogger.warn('messages', 'Reconnect synchronization failed', { error: String(error) }));
+        };
+        if (connectionVersion > 0) reconcile();
+        window.addEventListener('online', reconcile);
+        document.addEventListener('visibilitychange', reconcile);
+        return () => {
+            active = false;
+            window.removeEventListener('online', reconcile);
+            document.removeEventListener('visibilitychange', reconcile);
+        };
+    }, [conversationId, user?.uuid, connectionVersion, queryClient]);
+
     const sendMessageMutation = useMutation({
-        mutationFn: async ({ conversationId, content, parentMessageUuid, files, aiAgentUuid, agentThread }: SendMessageParams) => {
+        retry: false,
+        // Do not let React Query queue a mutation offline and replay it later:
+        // the composer preserves it for an explicit, user-controlled retry.
+        networkMode: 'always',
+        mutationFn: async ({ conversationId, content, parentMessageUuid, files, aiAgentUuid, agentThread, clientMessageId }: SendMessageParams) => {
+            if (navigator.onLine === false) throw new MessageDeliveryError('Hors connexion. Le message est conservé, mais n’a pas été envoyé.', 'not-sent');
             if (agentThread && (!aiAgentUuid || !parentMessageUuid)) {
                 throw new Error('Impossible d’identifier l’agent de ce thread. Rouvre la conversation avant de réessayer.');
             }
@@ -660,10 +674,10 @@ export function useMessages(conversationId: string | null) {
                 if (!response.ok) throw new Error('Impossible d’activer les agents dans les conversations.');
                 await updateUser({ ...user, ...await response.json(), ai_agents_enabled: true });
             }
-            const tempUuid = `temp-${Date.now()}`;
+            const tempUuid = clientMessageId || `temp-${crypto.randomUUID()}`;
             // Reserve before sending, so two simultaneous replies cannot route
             // a parentless framework response to the wrong thread.
-            const cancelExecution = agentThread && user?.uuid
+            let cancelExecution = agentThread && user?.uuid
                 ? reserveAgentExecution(user.uuid, conversationId, aiAgentUuid!, parentMessageUuid!)
                 : undefined;
             
@@ -704,26 +718,19 @@ export function useMessages(conversationId: string | null) {
                 attachments: optimisticAttachments.length > 0 ? optimisticAttachments : undefined,
             };
 
-            if (user?.uuid) {
-                webLogger.info('messages', 'Persisting optimistic message locally', {
-                    ownerUuid: user.uuid,
-                    conversationUuid: conversationId,
-                    tempUuid,
-                });
-                await webDatabaseManager.upsertMessage(optimisticMessage as unknown as Record<string, unknown>, user.uuid);
-                await webDatabaseManager.updateConversationFromMessage(
-                    conversationId,
-                    user.uuid,
-                    optimisticMessage as unknown as Record<string, unknown>
-                );
-            }
-
-            queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
-            queryClient.invalidateQueries({ queryKey: ['conversations'] });
-
             let res: Response;
+            let messageAccepted = false;
+            let submissionStarted = false;
             
             try {
+                if (user?.uuid) {
+                    await webDatabaseManager.upsertMessage(optimisticMessage as unknown as Record<string, unknown>, user.uuid);
+                    await webDatabaseManager.updateConversationFromMessage(
+                        conversationId, user.uuid, optimisticMessage as unknown as Record<string, unknown>
+                    );
+                }
+                queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
+                queryClient.invalidateQueries({ queryKey: ['conversations'] });
                 // Step 1: Upload files if any
                 const attachmentUuids: string[] = [];
                 if (files && files.length > 0) {
@@ -775,6 +782,7 @@ export function useMessages(conversationId: string | null) {
                 }
 
                 // Step 2: Send message payload
+                submissionStarted = true;
                 if (attachmentUuids.length > 0) {
                     res = await fetchWithAuth(
                         `${API_BASE_URL}/messaging/conversations/${conversationId}/messages/create-with-attachments/`,
@@ -801,10 +809,12 @@ export function useMessages(conversationId: string | null) {
                 }
 
                 if (!res.ok) {
-                    throw new Error('Failed to send message');
+                    throw new MessageDeliveryError(`Envoi refusé par le serveur (${res.status}).`, res.status >= 500 ? 'uncertain' : 'not-sent');
                 }
+                messageAccepted = true;
 
                 const payload = await res.json().catch(() => null);
+                if (payload && typeof payload === 'object') payload.client_message_id ||= tempUuid;
                 if (payload && typeof payload === 'object' && aiAgentUuid && !agentThread) {
                     payload.ai_agent_uuid = aiAgentUuid;
                     payload.web_agent_waiting_since = optimisticMessage.web_agent_waiting_since;
@@ -823,6 +833,18 @@ export function useMessages(conversationId: string | null) {
                 // agent explicitly. Persist the user's prompt first so the
                 // agent reads it in the conversation context.
                 if (aiAgentUuid && aiAgentUuid !== JARVIS_AGENT_UUID) {
+                    // Initial invocations need the same routing as follow-ups:
+                    // framework answers may arrive without a server parent.
+                    // Use the confirmed prompt UUID, never the temporary one,
+                    // and register before triggering even a very fast answer.
+                    if (!agentThread) {
+                        if (!user?.uuid || !payload?.uuid) {
+                            throw new Error('Impossible d’identifier le premier message du thread.');
+                        }
+                        cancelExecution = reserveAgentExecution(
+                            user.uuid, conversationId, aiAgentUuid, String(payload.uuid),
+                        );
+                    }
                     const triggered = sendWsMessage({
                         type: 'trigger_framework_agent',
                         agent_uuid: aiAgentUuid,
@@ -872,8 +894,13 @@ export function useMessages(conversationId: string | null) {
                 
             } catch (error) {
                 cancelExecution?.();
+                if (messageAccepted) {
+                    // A sync/storage/agent error after HTTP acceptance must not
+                    // restore the prompt as if nothing had been delivered.
+                    throw new MessageDeliveryError('Message envoyé, mais son suivi ou le lancement de l’agent a échoué. Vérifie la conversation avant toute nouvelle tentative.', 'sent');
+                }
                 if (user?.uuid) {
-                    await webDatabaseManager.updateMessageSyncStatus(tempUuid, user.uuid, 'failed');
+                    await webDatabaseManager.updateMessageSyncStatus(tempUuid, user.uuid, 'failed').catch(() => undefined);
                     queryClient.invalidateQueries({ queryKey: ['messages', conversationId] });
                 }
                 webLogger.error('messages', 'Message send failed', {
@@ -882,7 +909,8 @@ export function useMessages(conversationId: string | null) {
                     tempUuid,
                     error: error instanceof Error ? error.message : String(error),
                 });
-                throw error;
+                if (error instanceof MessageDeliveryError) throw error;
+                throw new MessageDeliveryError(error instanceof Error ? error.message : 'Envoi interrompu.', submissionStarted ? 'uncertain' : 'not-sent');
             }
         },
         onSuccess: (_data, variables) => {

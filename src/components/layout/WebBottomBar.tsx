@@ -3,6 +3,10 @@ import { IoSend, IoAdd, IoMic, IoClose, IoImage, IoDocument, IoHardwareChip, IoC
 import { useQuery } from '@tanstack/react-query';
 import { useJarvis } from '../../contexts/JarvisContext';
 import { useNavigation } from '../../contexts/NavigationContext';
+import { useAuth } from '../../contexts/AuthContext';
+import { useWebSocketContext } from '../../contexts/WebSocketContext';
+import { readComposer, saveDraft, beginSend, failSend, completeSend, subscribeComposer, type ComposerDraft } from '../../services/composerDrafts';
+import { MessageDeliveryError } from '../../services/messageDelivery';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
 import { enrichAgent, type BackendAgent, type ToolItem } from '../../data/toolsCatalog';
@@ -149,13 +153,21 @@ export default function WebBottomBar() {
         upsertLiveTurn,
     } = useJarvis();
     const { selectedConversation, sendCallback, replyTo, setReplyTo } = useNavigation();
+    const { user } = useAuth();
+    const { isConnected, isOnline } = useWebSocketContext();
+    const owner = user?.uuid || '';
+    const conversation = selectedConversation?.uuid || '';
+    const [saved] = useState(() => readComposer(owner, conversation));
+    const [recoveries, setRecoveries] = useState(saved.sends);
+    const [sendError, setSendError] = useState('');
+    const mountedRef = useRef(true);
 
-    const [text, setText] = useState('');
+    const [text, setText] = useState(saved.draft.text);
     const [stagedFiles, setStagedFiles] = useState<File[]>([]);
-    const [jarvisMode, setJarvisMode] = useState(false);
+    const [jarvisMode, setJarvisMode] = useState(saved.draft.jarvisMode);
     const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
     const [toolPickerOpen, setToolPickerOpen] = useState(false);
-    const [selectedTool, setSelectedTool] = useState<ToolItem | null>(null);
+    const [selectedTool, setSelectedTool] = useState<ToolItem | null>(saved.draft.agent);
     const startingAgentThread = jarvisMode && !replyTo?.isAgentThread;
     const [isRecording, setIsRecording] = useState(false);
     const [recordingSeconds, setRecordingSeconds] = useState(0);
@@ -180,6 +192,28 @@ export default function WebBottomBar() {
     const isChat = !!selectedConversation;
     const effectiveText = isChat ? text : composerText;
     const canSend = effectiveText.trim().length > 0 || stagedFiles.length > 0 || !!stagedVoice;
+
+    useEffect(() => {
+        mountedRef.current = true;
+        if (conversation && !replyTo && saved.draft.reply) setReplyTo(saved.draft.reply);
+        const unsubscribe = subscribeComposer(() => setRecoveries(readComposer(owner, conversation).sends));
+        return () => { mountedRef.current = false; unsubscribe(); };
+    // The composer is keyed by account and conversation in AppLayout.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        if (!conversation) return;
+        try { saveDraft(owner, conversation, { text, jarvisMode, agent: selectedTool, reply: replyTo }); }
+        catch { setSendError('Le navigateur ne peut pas sauvegarder le brouillon. Garde cette page ouverte.'); }
+    }, [owner, conversation, text, jarvisMode, selectedTool, replyTo]);
+
+    useEffect(() => {
+        if (!stagedFiles.length && !stagedVoice) return;
+        const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+    }, [stagedFiles.length, stagedVoice]);
 
     const { data: tools = [] } = useQuery({
         queryKey: ['agents', 'favorites', 'bottom-bar'],
@@ -216,8 +250,6 @@ export default function WebBottomBar() {
     useEffect(() => {
         setAttachmentMenuOpen(false);
         setToolPickerOpen(false);
-        setJarvisMode(false);
-        setSelectedTool(null);
         setStagedFiles([]);
         if (stagedVoice) URL.revokeObjectURL(stagedVoice.url);
         setStagedVoice(null);
@@ -395,6 +427,22 @@ export default function WebBottomBar() {
         if (sendLockRef.current) return;
         sendLockRef.current = true;
         setIsSending(true);
+        setSendError('');
+        const submissionId = `temp-${crypto.randomUUID()}`;
+        const submittedDraft: ComposerDraft = { text: effectiveText, jarvisMode, agent: selectedTool, reply: replyTo };
+        if (isChat) {
+            if (!sendCallback.current) {
+                setSendError('La conversation est en cours de chargement. Réessaie dans un instant.');
+                sendLockRef.current = false; setIsSending(false); return;
+            }
+            try {
+                beginSend(owner, conversation, { id: submissionId, draft: submittedDraft,
+                    fileNames: [...stagedFiles, ...(stagedVoice ? [stagedVoice.file] : [])].map(file => file.name), status: 'pending' });
+            } catch {
+                setSendError('Impossible de sauvegarder le message avant l’envoi. Libère de l’espace dans le navigateur puis réessaie.');
+                sendLockRef.current = false; setIsSending(false); return;
+            }
+        }
 
         // This invocation retains the submitted values in its closure. Reset
         // the composer immediately, without later erasing the next draft.
@@ -414,38 +462,39 @@ export default function WebBottomBar() {
             const inAgentThread = !!replyTo?.isAgentThread;
             const targetAgentUuid = inAgentThread ? replyTo?.aiAgentUuid || null : jarvisMode ? (selectedTool?.agentUuid || JARVIS_AGENT_UUID) : null;
             const filesToSend = stagedVoice ? [...stagedFiles, stagedVoice.file] : stagedFiles;
-            if (filesToSend.length > 0) {
-                await sendCallback.current.sendFiles(effectiveText.trim(), filesToSend, replyTo?.uuid ?? null, targetAgentUuid, inAgentThread);
-            } else {
-                await sendCallback.current.sendText(effectiveText.trim(), replyTo?.uuid ?? null, targetAgentUuid, inAgentThread);
-            }
+            const result = filesToSend.length > 0
+                ? await sendCallback.current.sendFiles(effectiveText.trim(), filesToSend, replyTo?.uuid ?? null, targetAgentUuid, inAgentThread, submissionId)
+                : await sendCallback.current.sendText(effectiveText.trim(), replyTo?.uuid ?? null, targetAgentUuid, inAgentThread, submissionId);
+            // Socket submission is only acknowledged when its echo is persisted.
+            if (!(result && typeof result === 'object' && 'tempUuid' in result)) completeSend(owner, conversation, submissionId);
         } else if (!isChat) {
             if (effectiveText.trim()) await sendJarvisMessage(effectiveText.trim());
         }
 
-        setStagedFiles([]);
-        cancelStagedVoice();
+        if (mountedRef.current) {
+            setStagedFiles(current => current.filter(file => !stagedFiles.includes(file)));
+            cancelStagedVoice();
+        }
 
         } catch (error) {
+            const message = error instanceof Error ? error.message : 'Impossible d’envoyer le message.';
             if (isChat) {
-                // Preserve a newly typed draft; restore the failed submission
-                // only if the composer is still empty.
-                setText(current => current || effectiveText);
-                setJarvisMode(jarvisMode);
-                setSelectedTool(selectedTool);
-                setReplyTo(replyTo);
+                try {
+                    if (error instanceof MessageDeliveryError && error.delivery === 'sent') completeSend(owner, conversation, submissionId);
+                    else failSend(owner, conversation, submissionId, message, error instanceof MessageDeliveryError && error.delivery === 'uncertain');
+                } catch { /* The in-memory UI still displays the failure. */ }
             }
-            window.alert(error instanceof Error ? error.message : 'Impossible d’envoyer le message.');
+            if (mountedRef.current) setSendError(message);
         } finally {
         window.setTimeout(() => {
             sendLockRef.current = false;
-            setIsSending(false);
+            if (mountedRef.current) setIsSending(false);
         }, 450);
         }
     };
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
+        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
             handleSend();
         }
@@ -518,6 +567,27 @@ export default function WebBottomBar() {
                         )}
                     </div>
                 )}
+
+                {isChat && (!isOnline || !isConnected) && <div className="wbb-delivery-notice" role="status">
+                    {!isOnline ? 'Hors connexion · les brouillons sont conservés' : 'Reconnexion du temps réel…'}
+                </div>}
+                {sendError && <div className="wbb-delivery-notice wbb-delivery-notice--error" role="alert">{sendError}</div>}
+                {isChat && recoveries.map(send => <div className="wbb-delivery-notice" key={send.id}>
+                    <span>{send.status === 'failed' ? 'Message non envoyé.' : isSending ? 'Envoi en cours…' : 'Envoi non confirmé : vérifie la conversation avant de le renvoyer.'}
+                        {send.fileNames.length > 0 && ` Fichiers à vérifier ou joindre à nouveau : ${send.fileNames.join(', ')}.`}</span>
+                    <button type="button" disabled={!!text.trim() || isSending} onClick={() => {
+                        try {
+                            saveDraft(owner, conversation, send.draft);
+                            setText(send.draft.text); setJarvisMode(send.draft.jarvisMode);
+                            setSelectedTool(send.draft.agent); setReplyTo(send.draft.reply);
+                            completeSend(owner, conversation, send.id); setSendError('');
+                            textareaRef.current?.focus();
+                        } catch { setSendError('Impossible de récupérer le brouillon.'); }
+                    }}>Reprendre dans la saisie</button>
+                    <button type="button" disabled={isSending} onClick={() => {
+                        try { completeSend(owner, conversation, send.id); } catch { setSendError('Impossible de masquer cet envoi.'); }
+                    }}>Masquer</button>
+                </div>)}
 
                 {/* Reply / new agent thread preview */}
                 {isChat && (replyTo || startingAgentThread) && (

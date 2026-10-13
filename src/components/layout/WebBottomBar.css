@@ -994,3 +994,23 @@
     .wbb-code-modal { max-height: calc(100vh - 24px); border-radius: 18px; }
     .wbb-code-modal__fields .wbb-code-modal__editor { min-height: 190px; }
 }
+.wbb-delivery-notice {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 4px 10px;
+    font-size: 12px;
+    color: #55615b;
+}
+.wbb-delivery-notice--error { color: #983f3f; }
+.wbb-delivery-notice button {
+    border: 1px solid #fff;
+    border-radius: 12px;
+    background: #f1f3f1;
+    padding: 5px 9px;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+.wbb-delivery-notice button:disabled { opacity: .5; cursor: default; }

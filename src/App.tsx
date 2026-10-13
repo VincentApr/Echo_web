@@ -75,17 +75,24 @@ function AppContent() {
   );
 }
 
+function SessionProviders() {
+  const { user } = useAuth();
+  return (
+    <NavigationProvider key={user?.uuid || 'anonymous'}>
+      <WebSocketProvider>
+        <JarvisProvider>
+          <AppContent />
+        </JarvisProvider>
+      </WebSocketProvider>
+    </NavigationProvider>
+  );
+}
+
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <NavigationProvider>
-          <WebSocketProvider>
-            <JarvisProvider>
-              <AppContent />
-            </JarvisProvider>
-          </WebSocketProvider>
-        </NavigationProvider>
+        <SessionProviders />
       </AuthProvider>
     </QueryClientProvider>
   );

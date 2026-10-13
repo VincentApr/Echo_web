@@ -1,5 +1,6 @@
 import { webLogger } from '../utils/logger';
 import { mergeThreadMessage, rememberThreadMessage } from './agentThreadExecution';
+import { completeSend } from './composerDrafts';
 
 type ConversationType = 'direct' | 'group' | 'agent';
 
@@ -62,7 +63,7 @@ type DatabaseSnapshot = {
 };
 
 const DB_NAME = 'echo_web_local_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const CONVERSATIONS_STORE = 'conversations';
 const MESSAGES_STORE = 'messages';
 const SYNC_STATE_STORE = 'sync_state';
@@ -145,6 +146,10 @@ export class WebDatabaseManager {
                     messages.createIndex('owner_uuid', 'owner_uuid', { unique: false });
                     messages.createIndex('owner_conversation', ['owner_uuid', 'conversation_uuid'], { unique: false });
                 }
+                const messages = request.transaction!.objectStore(MESSAGES_STORE);
+                if (!messages.indexNames.contains('owner_conversation_time')) {
+                    messages.createIndex('owner_conversation_time', ['owner_uuid', 'conversation_uuid', 'created_at_ms', 'uuid']);
+                }
 
                 if (!db.objectStoreNames.contains(SYNC_STATE_STORE)) {
                     const syncState = db.createObjectStore(SYNC_STATE_STORE, { keyPath: 'id' });
@@ -155,6 +160,10 @@ export class WebDatabaseManager {
 
             request.onsuccess = () => {
                 this.db = request.result;
+                this.db.onversionchange = () => {
+                    this.db?.close();
+                    this.db = null;
+                };
                 webLogger.debug('db', 'IndexedDB ready', {
                     stores: Array.from(this.db.objectStoreNames),
                 });
@@ -526,6 +535,13 @@ export class WebDatabaseManager {
             await this.requestToPromise(store.delete(pendingMatchId));
         }
         await this.requestToPromise(store.put(record));
+        if (!record.is_pending && !record.raw.sendError) {
+            const clientId = record.raw.client_message_id || pending?.uuid;
+            if (typeof clientId === 'string') {
+                try { completeSend(ownerUuid, record.conversation_uuid, clientId); }
+                catch { /* Composer storage must never prevent message ingestion. */ }
+            }
+        }
         webLogger.debug('db', 'Upserted message', {
             ownerUuid,
             conversationUuid: record.conversation_uuid,
@@ -554,48 +570,39 @@ export class WebDatabaseManager {
         ownerUuid: string,
         options: MessagePageOptions
     ): Promise<MessagePageResult> {
-        const records = await this.getAllByIndex<StoredMessageRecord>(
-            MESSAGES_STORE,
-            'owner_conversation',
-            [ownerUuid, conversationUuid]
+        const db = await this.getDb();
+        const limit = Math.max(1, Math.floor(options.limit));
+        const before = options.beforeCreatedAtMs !== undefined;
+        const range = IDBKeyRange.bound(
+            [ownerUuid, conversationUuid],
+            before
+                ? [ownerUuid, conversationUuid, options.beforeCreatedAtMs!, options.beforeUuid || '']
+                : [ownerUuid, conversationUuid, []],
+            false, before,
         );
-
-        const sorted = records.sort(compareMessagesDescending);
-        const filtered = sorted.filter((record) => {
-            if (options.beforeCreatedAtMs === undefined) return true;
-            if (record.created_at_ms < options.beforeCreatedAtMs) return true;
-            if (record.created_at_ms > options.beforeCreatedAtMs) return false;
-
-            if (!options.beforeUuid) return false;
-            return record.uuid.localeCompare(options.beforeUuid) < 0;
+        // Read only the requested page plus one lookahead record. Loading an
+        // older page must not deserialize/sort the entire conversation.
+        return new Promise((resolve, reject) => {
+            const index = db.transaction(MESSAGES_STORE, 'readonly').objectStore(MESSAGES_STORE).index('owner_conversation_time');
+            const request = index.openCursor(range, 'prev');
+            const records: StoredMessageRecord[] = [];
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                const cursor = request.result;
+                if (!cursor || records.length === limit) {
+                    resolve({ messages: records.map(record => record.raw), hasMoreLocal: !!cursor });
+                    return;
+                }
+                records.push(cursor.value as StoredMessageRecord);
+                cursor.continue();
+            };
         });
-
-        const page = filtered.slice(0, options.limit);
-
-        webLogger.debug('db', 'Loaded messages page', {
-            ownerUuid,
-            conversationUuid,
-            limit: options.limit,
-            beforeCreatedAtMs: options.beforeCreatedAtMs ?? null,
-            beforeUuid: options.beforeUuid ?? null,
-            returnedCount: page.length,
-            hasMoreLocal: filtered.length > options.limit,
-            totalInConversation: records.length,
-        });
-
-        return {
-            messages: page.map((record) => record.raw),
-            hasMoreLocal: filtered.length > options.limit,
-        };
     }
 
     async getMessageCount(conversationUuid: string, ownerUuid: string): Promise<number> {
-        const records = await this.getAllByIndex<StoredMessageRecord>(
-            MESSAGES_STORE,
-            'owner_conversation',
-            [ownerUuid, conversationUuid]
-        );
-        return records.length;
+        const db = await this.getDb();
+        return this.requestToPromise(db.transaction(MESSAGES_STORE, 'readonly')
+            .objectStore(MESSAGES_STORE).index('owner_conversation').count([ownerUuid, conversationUuid]));
     }
 
     async getNewestMessageTimestamp(conversationUuid: string, ownerUuid: string): Promise<number | null> {
@@ -606,7 +613,10 @@ export class WebDatabaseManager {
         );
         if (records.length === 0) return null;
 
-        const newest = records.sort(compareMessagesDescending)[0];
+        // An optimistic/failed message uses the client clock and must never
+        // advance the server-history watermark past messages missed offline.
+        const newest = records.filter(record => record.sync_status === 'synced' && !record.uuid.startsWith('temp-'))
+            .sort(compareMessagesDescending)[0];
         return newest?.created_at_ms ?? null;
     }
 

@@ -179,6 +179,12 @@
     height: 0;
 }
 
+/* Keep the selected bubble aligned with its fixed context menu. */
+.thread-messages:has(.message-wrapper--active) {
+    overflow-y: hidden;
+    overscroll-behavior: none;
+}
+
 .thread-loading {
     margin: auto;
     color: #888;
@@ -191,19 +197,32 @@
     flex-shrink: 0;
 }
 
-.thread-history-loading {
-    align-self: center;
-    margin: 4px 0 10px;
-    padding: 6px 14px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 500;
-    color: rgba(6, 95, 70, 0.85);
-    background: rgba(10, 145, 104, 0.1);
+.thread-history-slot {
+    height: 28px;
+    flex: 0 0 28px;
     display: flex;
     align-items: center;
-    gap: 8px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    justify-content: center;
+}
+
+.thread-history-loading {
+    align-self: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.thread-history-retry {
+    border: 0;
+    background: transparent;
+    color: rgba(71, 85, 105, 0.8);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.thread-history-retry:hover {
+    text-decoration: underline;
 }
 
 .thread-day-separator {
@@ -237,7 +256,17 @@
 }
 
 .thread-history-spinner {
+    display: block;
+    width: 13px;
+    height: 13px;
+    border: 1.5px solid rgba(71, 85, 105, 0.12);
+    border-top-color: rgba(71, 85, 105, 0.45);
+    border-radius: 50%;
     animation: rotate-spinner 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .thread-history-spinner { animation: none; }
 }
 
 @keyframes rotate-spinner {
