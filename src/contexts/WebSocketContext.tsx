@@ -71,6 +71,7 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             setIsConnected(true);
             retryAttemptRef.current = 0;
             setConnectionVersion(version => version + 1);
+            void queryClient.invalidateQueries({ queryKey: ['watches', user.uuid] });
             // Reload sidebar data from the server, not only from IndexedDB.
             void Promise.allSettled((['private', 'group', 'agent'] as const).map(type => syncConversationsByType(user.uuid, type)))
                 .then(() => { if (wsRef.current === ws) void queryClient.invalidateQueries({ queryKey: ['conversations'] }); });
@@ -84,6 +85,9 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             if (wsRef.current !== ws) return;
             try {
                 const data = JSON.parse(event.data);
+                if (data.type === 'notification_friend_request' || data.type === 'notification_group_invitation') {
+                    void queryClient.invalidateQueries({ queryKey: ['watches', user.uuid] });
+                }
                 // Development trace: identifiers and shape only, never tokens or
                 // message text. Vite forwards warnings to the preview terminal.
                 if (import.meta.env.DEV) {

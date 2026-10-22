@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
-const BACKEND_URL = 'https://reseausocial-production.up.railway.app';
+const BACKEND_URL = 'https://api.echosocial.fr';
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -14,6 +14,8 @@ export default defineConfig({
       '/api': { target: BACKEND_URL, changeOrigin: true, secure: true },
       '/messaging': { target: BACKEND_URL, changeOrigin: true, secure: true },
       '/notif': { target: BACKEND_URL, changeOrigin: true, secure: true },
+      '/watches': { target: BACKEND_URL, changeOrigin: true, secure: true },
+      '/tools': { target: BACKEND_URL, changeOrigin: true, secure: true },
       '/jarvis': { target: BACKEND_URL, changeOrigin: true, secure: true },
       '/relations': { target: BACKEND_URL, changeOrigin: true, secure: true },
       '/groups': { target: BACKEND_URL, changeOrigin: true, secure: true },

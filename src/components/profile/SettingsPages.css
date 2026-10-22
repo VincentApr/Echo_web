@@ -459,3 +459,5 @@
 .spage-ai-domain .spage-row-meta { line-height: 1.5; }
 .spage-ai-domain .spage-toggle { flex-shrink: 0; }
 .spage-ai-permissions > .spage-section-hint:last-child { margin-top: 16px; }
+.spage-watch-device-actions,.spage-watch-hours { display:flex; gap:12px; flex-wrap:wrap; }
+.spage-watch-device-actions { padding:8px 0 16px; }

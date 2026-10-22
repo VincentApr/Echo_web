@@ -24,3 +24,7 @@ test-results/
 *.njsproj
 *.sln
 *.sw?
+
+# Separate local backend checkouts; published from their own repository.
+/backend-server/
+/backend-reference/

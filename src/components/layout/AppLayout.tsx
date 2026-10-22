@@ -11,7 +11,7 @@ interface AppLayoutProps {
   panelContent: (activePage: PageId, onSearchExpansionChange: (expanded: boolean) => void, columns: number) => React.ReactNode | null;
 }
 
-const PAGES_WITH_PANEL: PageId[] = ['conversations', 'groups', 'agents', 'add-friend', 'add-group', 'add-agent'];
+const PAGES_WITH_PANEL: PageId[] = ['watch', 'conversations', 'groups', 'agents', 'add-friend', 'add-group', 'add-agent'];
 
 export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const { user, isLoggedIn, logout } = useAuth();
@@ -23,8 +23,8 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   });
   const [isResizingPanel, setIsResizingPanel] = useState(false);
 
-  const isPanelOpen = PAGES_WITH_PANEL.includes(currentPage) && isSidebarPanelOpen;
-  const isImmersivePage = currentPage === 'add-friend' || currentPage === 'add-group' || currentPage === 'add-agent' || currentPage === 'marketplace' || currentPage === 'profile';
+  const isPanelOpen = PAGES_WITH_PANEL.includes(currentPage) && (isSidebarPanelOpen || currentPage === 'watch');
+  const isImmersivePage = currentPage === 'watch' || currentPage === 'add-friend' || currentPage === 'add-group' || currentPage === 'add-agent' || currentPage === 'marketplace' || currentPage === 'profile';
   const panelWidth = Math.max(savedPanelWidth, isSearchExpanded ? getSidebarPanelWidthForColumns(2) : SIDEBAR_PANEL_MIN_WIDTH);
   const panelColumns = panelWidth >= getSidebarPanelWidthForColumns(3) ? 3 : panelWidth >= getSidebarPanelWidthForColumns(2) ? 2 : 1;
   const handleSearchExpansionChange = useCallback((expanded: boolean) => setIsSearchExpanded(expanded), []);
@@ -45,7 +45,7 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const userName = user?.username || user?.first_name || undefined;
 
   return (
-    <div className="app-layout">
+    <div className={`app-layout ${currentPage === 'watch' ? 'app-layout--watch' : ''}`}>
       <div className="app-layout__body">
         <Sidebar
           activePage={currentPage}

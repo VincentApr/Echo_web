@@ -4,6 +4,8 @@ import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { AI_PERMISSION_GROUPS, type AiPermissions } from '../../services/aiPermissions';
+import SettingsWatches from './SettingsWatches';
+import SettingsWatchConnections from './SettingsWatchConnections';
 
 interface JarvisInstance {
     is_active: boolean;
@@ -107,6 +109,8 @@ export default function SettingsAiFeatures() {
                 </div>
             </section>
             {!loading && !policySupported && <p className="spage-ai-status">La désactivation complète de l’IA nécessite la mise à jour du serveur.</p>}
+            <SettingsWatches />
+            <SettingsWatchConnections />
             {error && <p className="spage-ai-error" role="alert">{error}</p>}
             {msg && <p className="spage-ai-status" role="status">{msg}</p>}
             {loading ? <div className="spage-loading" role="status">Chargement des autorisations…</div> : !jarvis ? (

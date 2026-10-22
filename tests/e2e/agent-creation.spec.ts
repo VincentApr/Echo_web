@@ -11,9 +11,10 @@ async function setup(page: Page, lostFavoriteResponse = false) {
         localStorage.setItem('refreshToken', 'test-refresh');
     });
     await page.routeWebSocket(/\/ws\//, () => {});
-    await page.route(/\/(api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
+    await page.route(/^https?:\/\/[^/]+\/(watches|tools|api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
         const request = route.request();
         const path = new URL(request.url()).pathname;
+        if (path === '/watches/') return route.fulfill({ json: { results: [], count: 0, next_offset: null, checked_at: new Date().toISOString() } });
         if (path === '/framework/agents/mistral/' && request.method() === 'POST') {
             const body = request.postDataJSON();
             creations.push(body);

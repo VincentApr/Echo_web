@@ -11,7 +11,7 @@ import {
 import { useAuth } from '../../contexts/AuthContext';
 import './Sidebar.css';
 
-export type PageId = 'home' | 'conversations' | 'groups' | 'agents' | 'marketplace' | 'profile' | 'add-friend' | 'add-group' | 'add-agent';
+export type PageId = 'watch' | 'home' | 'conversations' | 'groups' | 'agents' | 'marketplace' | 'profile' | 'add-friend' | 'add-group' | 'add-agent';
 
 interface NavItem {
     id: PageId;
@@ -83,7 +83,7 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
                 <nav className="sidebar__rail">
                     <div className="sidebar__nav-items">
                         {NAV_ITEMS.filter(item => user?.ai_agents_enabled !== false || (item.id !== 'agents' && item.id !== 'marketplace')).map((item) => {
-                            const isActive = activePage === item.id;
+                            const isActive = (activePage === 'watch' ? 'home' : activePage) === item.id;
                             const isHovered = hoveredItem === item.id;
 
                             return (

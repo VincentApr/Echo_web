@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import type { PageId } from '../components/layout/Sidebar';
 import type { Conversation } from '../hooks/useConversations';
 
@@ -19,6 +19,9 @@ export interface ReplyTarget {
 
 interface NavigationContextType {
     currentPage: PageId;
+    watchUuid: string | null;
+    openWatch: (uuid: string) => void;
+    closeWatch: () => void;
     selectedConversation: Conversation | null;
     conversationView: 'thread' | 'management';
     isSidebarPanelOpen: boolean;
@@ -72,7 +75,9 @@ const createInitialTabMemories = (): Record<ConversationPage, TabMemory> => ({
 });
 
 export function NavigationProvider({ children }: { children: React.ReactNode }) {
-    const [currentPage, setCurrentPage] = useState<PageId>('home');
+    const initialWatch = () => window.location.pathname.match(/^\/veilles\/([0-9a-f-]{36})\/?$/i)?.[1] ?? null;
+    const [watchUuid, setWatchUuid] = useState<string | null>(initialWatch);
+    const [currentPage, setCurrentPage] = useState<PageId>(() => initialWatch() ? 'watch' : 'home');
     const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
     const [conversationView, setConversationView] = useState<'thread' | 'management'>('thread');
     const [isSidebarPanelOpen, setIsSidebarPanelOpen] = useState(false);
@@ -111,6 +116,10 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 
     const navigate = useCallback((page: PageId) => {
         saveCurrentTab();
+        if (page !== 'watch') {
+            setWatchUuid(null);
+            if (window.location.pathname.startsWith('/veilles/')) window.history.pushState({}, '', '/');
+        }
         const targetTab = PAGE_TO_CONVERSATION_TAB[page];
         currentPageRef.current = page;
         setCurrentPage(page);
@@ -131,7 +140,33 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
         setReplyTo(null);
     }, [applyTabMemory, saveCurrentTab]);
 
+    const openWatch = useCallback((uuid: string) => {
+        if (window.location.pathname !== `/veilles/${uuid}`) window.history.pushState({ echoWatch: true }, '', `/veilles/${uuid}`);
+        setWatchUuid(uuid);
+        navigate('watch');
+    }, [navigate]);
+
+    const closeWatch = useCallback(() => {
+        if (window.history.state?.echoWatch) {
+            // Return directly to the grid, even after browsing several subjects.
+            window.history.replaceState({}, '', '/');
+        }
+        navigate('home');
+    }, [navigate]);
+
+    useEffect(() => {
+        const restore = () => {
+            const uuid = window.location.pathname.match(/^\/veilles\/([0-9a-f-]{36})\/?$/i)?.[1] ?? null;
+            setWatchUuid(uuid);
+            navigate(uuid ? 'watch' : 'home');
+        };
+        window.addEventListener('popstate', restore);
+        return () => window.removeEventListener('popstate', restore);
+    }, [navigate]);
+
     const openConversation = useCallback((conv: Conversation) => {
+        setWatchUuid(null);
+        if (window.location.pathname.startsWith('/veilles/')) window.history.pushState({}, '', '/');
         const targetPage = (CONV_TYPE_TO_PAGE[conv.conversation_type] ?? 'conversations') as ConversationPage;
         saveCurrentTab();
         const memory: TabMemory = {
@@ -207,6 +242,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     return (
         <NavigationContext.Provider value={{
             currentPage,
+            watchUuid, openWatch, closeWatch,
             selectedConversation,
             conversationView,
             isSidebarPanelOpen,

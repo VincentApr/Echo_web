@@ -203,7 +203,7 @@ function computeAvatarUrl(conv: Conversation): string {
     return p?.photo_profil_url || u?.photo_profil_url || u?.photo_profil || '';
 }
 
-function enrichConversation(conv: Conversation): Conversation {
+export function enrichConversation(conv: Conversation): Conversation {
     const normalizedType = normalizeConvType(conv);
     return {
         ...conv,

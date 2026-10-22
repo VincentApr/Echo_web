@@ -25,7 +25,9 @@ if (!existsSync(indexPath)) {
 
 console.log('Serving static files from:', distPath);
 
-app.use(express.static(distPath));
+app.use(express.static(distPath, {setHeaders: (res, path) => {
+  if (path.endsWith('watch-push-sw.js')) res.setHeader('Cache-Control', 'no-cache');
+}}));
 
 // Routage SPA : toute URL inconnue renvoie index.html.
 app.get('/{*splat}', (req, res) => {

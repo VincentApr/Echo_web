@@ -15,8 +15,9 @@ async function setup(page: Page, options: { failSave?: boolean; legacy?: boolean
         localStorage.setItem('refreshToken', 'test-refresh');
     }, user);
     await page.routeWebSocket(/\/ws\//, () => {});
-    await page.route(/\/(api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
+    await page.route(/^https?:\/\/[^/]+\/(watches|tools|api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
         const path = new URL(route.request().url()).pathname;
+        if (path === '/watches/') return route.fulfill({ json: { results: [], count: 0, next_offset: null, checked_at: new Date().toISOString() } });
         if (path === '/jarvis/instance/') {
             if (options.failLoad) return route.fulfill({ status: 503, json: {} });
             if (route.request().method() === 'PATCH') {

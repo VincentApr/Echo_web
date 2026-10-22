@@ -195,6 +195,13 @@ export default function WebBottomBar() {
     const canSend = effectiveText.trim().length > 0 || stagedFiles.length > 0 || !!stagedVoice;
 
     useEffect(() => {
+        const input = textareaRef.current;
+        if (!input) return;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 242) + 'px';
+    }, [effectiveText]);
+
+    useEffect(() => {
         mountedRef.current = true;
         if (conversation && !replyTo && saved.draft.reply) setReplyTo(saved.draft.reply);
         const unsubscribe = subscribeComposer(() => setRecoveries(readComposer(owner, conversation).sends));
@@ -515,8 +522,6 @@ export default function WebBottomBar() {
     const handleTextChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         if (isChat) setText(e.target.value);
         else setComposerText(e.target.value);
-        e.target.style.height = 'auto';
-        e.target.style.height = Math.min(e.target.scrollHeight, 242) + 'px';
     };
 
     const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {

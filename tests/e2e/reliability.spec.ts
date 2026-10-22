@@ -20,8 +20,9 @@ async function setup(page: Page, send?: (route: Route) => Promise<void>) {
     }, { owner });
     await page.routeWebSocket(/\/ws\/chat\//, ws => { sockets.push(ws); });
     // Every backend route is intercepted: the tests never use real accounts.
-    await page.route(/\/(api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
+    await page.route(/^https?:\/\/[^/]+\/(watches|tools|api|messaging|framework|jarvis|relations|groups|notif|scripts)\//, async route => {
         const path = new URL(route.request().url()).pathname;
+        if (path === '/watches/') return route.fulfill({ json: { results: [], count: 0, next_offset: null, checked_at: new Date().toISOString() } });
         requests.push(path);
         if (path.endsWith('/messages/create/') && send) return send(route);
         if (path === '/messaging/conversations/private/') return route.fulfill({ json: conversations });

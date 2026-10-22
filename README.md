@@ -29,7 +29,8 @@ npm ci
 npm run dev
 ```
 
-Le serveur de dev relaie `/api`, `/messaging`, `/ws`, etc. vers le backend (cf.
+Le backend public est `https://api.echosocial.fr` (WebSockets :
+`wss://api.echosocial.fr`). Le serveur de dev relaie `/api`, `/messaging`, `/ws`, etc. vers ce backend (cf.
 `vite.config.ts`). En production, `src/config/api.ts` bascule sur l'URL absolue
 du backend : aucun relais n'est nécessaire.
 
@@ -46,6 +47,23 @@ et [`server.js`](server.js) (Express, port `PORT`, repli SPA sur `index.html`).
 
 Le domaine `web.echosocial.fr` doit figurer dans `CORS_ALLOWED_ORIGINS` et
 `CSRF_TRUSTED_ORIGINS` du backend, sinon tous les appels API sont rejetés.
+
+L'accueil intelligent nécessite aussi le déploiement du backend `watches`, ses
+migrations et un processus worker distinct sur l'hébergement du backend. Publier le seul dépôt web ne
+suffit pas. L'ordre de mise en service et les commandes sont décrits dans
+le [guide de mise en service et de recette](docs/watches-lot-5-6.md).
+Les détails du moteur initial sont conservés dans
+[`docs/watches-lot-2.md`](docs/watches-lot-2.md).
+
+Pour lancer la simulation isolée dans ce checkout, cloner séparément le backend
+`VincentApr/reseau_social` dans `backend-server/` ; ce dossier est ignoré par le
+dépôt web et se publie depuis son propre dépôt Git.
+Le regroupement des sources et sa migration supplémentaire sont décrits dans
+[`docs/watches-lot-3.md`](docs/watches-lot-3.md).
+La recommandation d'agents, le brouillon de contexte et la migration associée sont
+décrits dans [`docs/watches-lot-4.md`](docs/watches-lot-4.md).
+Les illustrations, notifications web et le premier essai Gmail/GitHub sont décrits
+dans [`docs/watches-lot-5-6.md`](docs/watches-lot-5-6.md).
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 

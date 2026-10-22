@@ -1,6 +1,6 @@
 // Authentication context for the web application.
 // Reuses: fetchWithAuth, setLogoutCallback, storage, API_BASE_URL
-// Removes: expo-router, push notifications, DatabaseManager, SQLite
+// Removes native Expo dependencies; browser watch notifications are optional.
 
 import { API_BASE_URL } from '@web/config/api';
 import { CURRENT_CGU_VERSION } from '@web/constants/cgu';
@@ -9,6 +9,7 @@ import { hasAcceptedCurrentCguLocally, markCurrentCguAcceptedLocally } from '@we
 import { cacheManager } from '@web/services/cacheManager';
 import { storage } from '@web/services/storage';
 import { clearComposerForOwner } from '../services/composerDrafts';
+import { releaseWatchDevice } from '../services/watchNotifications';
 import { useQueryClient } from '@tanstack/react-query';
 import { webDatabaseManager } from '../services/webDatabase';
 import { webLogger } from '../utils/logger';
@@ -227,6 +228,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         if (isLoggingOutRef.current) return;
         isLoggingOutRef.current = true;
         try {
+            if (user?.uuid) {
+                // Revoke this device before clearing credentials, without letting
+                // an unavailable push service hold up an explicit logout.
+                await Promise.race([releaseWatchDevice(user.uuid),new Promise(resolve=>setTimeout(resolve,1200))]);
+            }
             const currentRefresh = await storage.getItemAsync('refreshToken');
             webLogger.info('auth', 'Logging out', {
                 callApi,
