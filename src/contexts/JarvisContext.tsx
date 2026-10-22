@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { sendTemporaryJarvisAgentMessage } from '@web/services/jarvisAgentConversation';
 import { useAuth } from './AuthContext';
 import {
@@ -38,9 +38,16 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     const [composerText, setComposerText] = useState('');
     const [composerFocusKey, setComposerFocusKey] = useState(0);
     const [localMessagesByConversation, setLocalMessagesByConversation] = useState<Record<string, Message[]>>({});
+    const aiEnabled = user?.ai_agents_enabled !== false;
+    const aiEnabledRef = useRef(aiEnabled);
+    aiEnabledRef.current = aiEnabled;
     const temporaryConversationUuidRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!aiEnabled) { setLiveTurns([]); setComposerText(''); setLocalMessagesByConversation({}); temporaryConversationUuidRef.current = null; }
+    }, [aiEnabled]);
 
     const upsertLiveTurn = useCallback((turn: JarvisLiveTurn) => {
+        if (!aiEnabledRef.current) return;
         setLiveTurns(prev => {
             const idx = prev.findIndex(t => t.id === turn.id);
             if (idx === -1) return [...prev, turn];
@@ -64,7 +71,7 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const sendJarvisMessage = useCallback(async (message: string) => {
-        if (!message.trim() || !isLoggedIn) return;
+        if (!message.trim() || !isLoggedIn || !aiEnabledRef.current) return;
 
         const turnId = Date.now().toString();
         const newTurn: JarvisLiveTurn = {
@@ -96,6 +103,7 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     }, [localMessagesByConversation]);
 
     const upsertLocalConversationMessage = useCallback((conversationUuid: string, message: Message) => {
+        if (!aiEnabledRef.current) return;
         setLocalMessagesByConversation(prev => {
             const current = prev[conversationUuid] ?? [];
             const index = current.findIndex(item => item.uuid === message.uuid);
@@ -108,7 +116,7 @@ export function JarvisProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const sendJarvisInteraction = useCallback(async (request: JarvisInteractionRequest) => {
-        if (!request.message.trim() || !isLoggedIn) return;
+        if (!request.message.trim() || !isLoggedIn || !aiEnabledRef.current) return;
 
         if (!request.conversationUuid) {
             await sendJarvisMessage(request.message);

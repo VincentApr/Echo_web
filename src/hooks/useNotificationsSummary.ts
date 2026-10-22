@@ -78,7 +78,7 @@ export function useNotificationsSummary() {
     const hasFetchedRef = useRef(false);
 
     const fetchSummaries = useCallback(async () => {
-        if (!isLoggedIn) {
+        if (!isLoggedIn || user?.ai_agents_enabled === false) {
             setSummaries([]);
             setLoading(false);
             setRefreshing(false);
@@ -99,10 +99,11 @@ export function useNotificationsSummary() {
             setLoading(false);
             setRefreshing(false);
         }
-    }, [isLoggedIn]);
+    }, [isLoggedIn, user?.ai_agents_enabled]);
 
     useEffect(() => {
-        if (!user || hasFetchedRef.current) return;
+        if (!user || user.ai_agents_enabled === false) { hasFetchedRef.current = false; setSummaries([]); setLoading(false); return; }
+        if (hasFetchedRef.current) return;
         hasFetchedRef.current = true;
         setLoading(true);
         fetchSummaries();

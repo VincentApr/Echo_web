@@ -3,6 +3,8 @@
 export interface User {
   uuid: string;
   username: string;
+  ai_agents_enabled?: boolean;
+  ai_policy_version?: number;
   first_name?: string;
   last_name?: string;
   email?: string;

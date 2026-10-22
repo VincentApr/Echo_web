@@ -392,6 +392,7 @@ export function ConversationThread({
     const mergedMessages = useMemo(() => {
         const byUuid = new Map<string, Message>();
         messages.forEach((message) => {
+            if (user?.ai_agents_enabled === false && (isAgentMessage(message) || message.is_agent_thread_root)) return;
             // Attachment sends can briefly produce a server/optimistic record
             // with neither text nor attachment metadata. Do not render that
             // transport placeholder as an empty chat bubble.
@@ -404,8 +405,8 @@ export function ConversationThread({
             byUuid.set(message.uuid, message);
         });
         localJarvisMessages.forEach((message) => byUuid.set(message.uuid, message));
-        return Array.from(byUuid.values());
-    }, [messages, localJarvisMessages]);
+        return Array.from(byUuid.values()).filter(message => user?.ai_agents_enabled !== false || (!isAgentMessage(message) && !message.is_agent_thread_root));
+    }, [messages, localJarvisMessages, user?.ai_agents_enabled]);
 
     const orderedMessages = useMemo(() => mergedMessages.slice().reverse(), [mergedMessages]);
     const oldestRenderedMessageUuid = orderedMessages[0]?.uuid ?? null;

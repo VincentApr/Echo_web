@@ -8,6 +8,7 @@ import {
     IoPersonOutline, IoPerson,
     IoLogOutOutline,
 } from 'react-icons/io5';
+import { useAuth } from '../../contexts/AuthContext';
 import './Sidebar.css';
 
 export type PageId = 'home' | 'conversations' | 'groups' | 'agents' | 'marketplace' | 'profile' | 'add-friend' | 'add-group' | 'add-agent';
@@ -46,6 +47,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ activePage, onNavigate, panelContent, panelWidth, isPanelOpen, isResizing, onResizeStart, onPanelWidthChange, onResizeEnd, userPhoto, userName, isLoggedIn, onLogout }: SidebarProps) {
+    const { user } = useAuth();
     const [hoveredItem, setHoveredItem] = useState<PageId | null>(null);
 
     const handleClick = useCallback((item: NavItem) => {
@@ -80,7 +82,7 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
                 {/* Icon rail */}
                 <nav className="sidebar__rail">
                     <div className="sidebar__nav-items">
-                        {NAV_ITEMS.map((item) => {
+                        {NAV_ITEMS.filter(item => user?.ai_agents_enabled !== false || (item.id !== 'agents' && item.id !== 'marketplace')).map((item) => {
                             const isActive = activePage === item.id;
                             const isHovered = hoveredItem === item.id;
 

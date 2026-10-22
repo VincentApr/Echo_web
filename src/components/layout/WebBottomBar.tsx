@@ -155,6 +155,7 @@ export default function WebBottomBar() {
     const { selectedConversation, sendCallback, replyTo, setReplyTo } = useNavigation();
     const { user } = useAuth();
     const { isConnected, isOnline } = useWebSocketContext();
+    const aiEnabled = user?.ai_agents_enabled !== false;
     const owner = user?.uuid || '';
     const conversation = selectedConversation?.uuid || '';
     const [saved] = useState(() => readComposer(owner, conversation));
@@ -215,6 +216,13 @@ export default function WebBottomBar() {
         return () => window.removeEventListener('beforeunload', warn);
     }, [stagedFiles.length, stagedVoice]);
 
+    useEffect(() => {
+        if (!aiEnabled) {
+            setJarvisMode(false); setSelectedTool(null); setToolPickerOpen(false);
+            if (replyTo?.isAgentThread) setReplyTo(null);
+        }
+    }, [aiEnabled, replyTo?.isAgentThread, setReplyTo]);
+
     const { data: tools = [] } = useQuery({
         queryKey: ['agents', 'favorites', 'bottom-bar'],
         queryFn: async (): Promise<ToolItem[]> => {
@@ -228,7 +236,7 @@ export default function WebBottomBar() {
             });
             return [...unique.values()].filter((agent) => agent.is_favorite).map(enrichAgent);
         },
-        enabled: isChat && (jarvisMode || toolPickerOpen),
+        enabled: aiEnabled && isChat && (jarvisMode || toolPickerOpen),
         staleTime: 5 * 60_000,
     });
 
@@ -424,6 +432,10 @@ export default function WebBottomBar() {
 
     const handleSend = async () => {
         if (!canSend) return;
+        if (!aiEnabled && (!isChat || jarvisMode || replyTo?.isAgentThread || selectedConversation?.conversation_type === 'agent')) {
+            setSendError('Les fonctionnalités IA sont désactivées dans vos paramètres.');
+            return;
+        }
         if (sendLockRef.current) return;
         sendLockRef.current = true;
         setIsSending(true);
@@ -526,6 +538,8 @@ export default function WebBottomBar() {
         textareaRef.current?.focus();
     };
 
+    if (!aiEnabled && (!isChat || selectedConversation?.conversation_type === 'agent')) return null;
+
     return (
         <footer className={`web-bottom-bar ${isChat ? 'web-bottom-bar--chat' : 'web-bottom-bar--jarvis'}`}>
 
@@ -551,10 +565,10 @@ export default function WebBottomBar() {
                                     <span className="wbb-attachment-option__icon wbb-attachment-option__icon--file"><IoDocument size={20} /></span>
                                     <span>Fichier</span>
                                 </button>
-                                <button type="button" className="wbb-attachment-option" onClick={() => setToolPickerOpen(true)} disabled={!isChat}>
+                                {aiEnabled && <button type="button" className="wbb-attachment-option" onClick={() => setToolPickerOpen(true)} disabled={!isChat || !aiEnabled}>
                                     <span className="wbb-attachment-option__icon wbb-attachment-option__icon--agent"><IoHardwareChip size={20} /></span>
                                     <span>Agents</span>
-                                </button>
+                                </button>}
                                 <button type="button" className="wbb-attachment-option" disabled={!isChat} onClick={() => {
                                     setAttachmentMenuOpen(false);
                                     setCodeError('');
@@ -669,7 +683,7 @@ export default function WebBottomBar() {
                     <input ref={fileInputRef} type="file" multiple hidden onChange={(event) => { handleFilePick(event); setAttachmentMenuOpen(false); setJarvisMode(false); }} />
 
                     {/* Jarvis/thread mode button */}
-                    {isChat && (
+                    {isChat && aiEnabled && (
                         <>
                             <button
                                 type="button"

@@ -24,11 +24,13 @@ const queryClient = new QueryClient({
 });
 
 function AppContent() {
-  const { isLoggedIn, loading } = useAuth();
+  const { isLoggedIn, loading, user } = useAuth();
 
   const renderPage = (activePage: PageId) => {
     if (loading) return null;
     if (!isLoggedIn) return <LoginPage />;
+
+    if (user?.ai_agents_enabled === false && ['agents', 'add-agent', 'marketplace'].includes(activePage)) return <HomePage />;
 
     switch (activePage) {
       case 'home':

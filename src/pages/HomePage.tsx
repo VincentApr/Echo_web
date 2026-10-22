@@ -52,6 +52,7 @@ export default function HomePage() {
     const [activeSuggestionId, setActiveSuggestionId] = useState<string | null>(null);
     const [isOpeningConversation, setIsOpeningConversation] = useState(false);
     const [pinRevision, setPinRevision] = useState(0);
+    const aiEnabled = user?.ai_agents_enabled !== false;
     const identity = user?.uuid || user?.username || 'echo';
     const firstName = (user?.first_name || user?.username || '').trim().split(/\s+/)[0];
     const welcomeMessage = WELCOME_MESSAGES[stableIndex(identity, WELCOME_MESSAGES.length)]
@@ -61,7 +62,7 @@ export default function HomePage() {
         return Array.from({ length: 5 }, (_, index) => SUGGESTIONS[(offset + index) % SUGGESTIONS.length]);
     }, [identity]);
     const activeSuggestion = SUGGESTIONS.find(item => item.id === activeSuggestionId) ?? null;
-    const latestTurn = liveTurns.at(-1) ?? null;
+    const latestTurn = aiEnabled ? liveTurns.at(-1) ?? null : null;
     const previousTurns = liveTurns.slice(0, -1);
     const pinnedConversations = useMemo(() => {
         const pinnedIds = getPinnedConversationUuids(user?.uuid);
@@ -112,7 +113,7 @@ export default function HomePage() {
     return (
         <section className={`home-page ${latestTurn ? 'home-page--with-jarvis' : ''}`}>
             {!latestTurn && <div className="home-page__welcome">
-                <img className="home-page__welcome-logo" src={jarvisLogo} alt="" />
+                {aiEnabled && <img className="home-page__welcome-logo" src={jarvisLogo} alt="" />}
                 <p className="home-page__welcome-text">{welcomeMessage}</p>
             </div>}
 
@@ -142,7 +143,7 @@ export default function HomePage() {
                 </div>
             </article>}
 
-            {activeSuggestion ? <div className="home-page__completions">
+            {aiEnabled && (activeSuggestion ? <div className="home-page__completions">
                 <button type="button" className="home-page__completions-dismiss" onClick={() => setActiveSuggestionId(null)} aria-label="Fermer les suggestions" />
                 <div className="home-page__completions-list">{activeSuggestion.completions.map(completion =>
                     <button type="button" className="home-page__completion" key={completion} onClick={() => chooseCompletion(completion)}>
@@ -152,7 +153,7 @@ export default function HomePage() {
                 {visibleSuggestions.map(suggestion => <button type="button" className="home-page__suggestion" key={suggestion.id} onClick={() => setActiveSuggestionId(suggestion.id)}>
                     <span className="home-page__suggestion-icon">{suggestion.icon}</span><span>{suggestion.keyword}</span>
                 </button>)}
-            </div>}
+            </div>)}
         </section>
     );
 }
