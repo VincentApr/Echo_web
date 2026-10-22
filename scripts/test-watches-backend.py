@@ -39,6 +39,7 @@ class GroupMember(models.Model):
     group = models.ForeignKey(Group, on_delete=models.CASCADE, related_name='memberships')
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     is_banned = models.BooleanField(default=False)
+    is_active = models.BooleanField(default=True)
     invited_by = models.ForeignKey(User, null=True, on_delete=models.SET_NULL, related_name='+')
     role = models.CharField(max_length=20, default='member')
     class Meta: unique_together = [('group', 'user')]
@@ -231,7 +232,7 @@ class UserOAuthConnection(models.Model):
                     result, status = {'detail': 'Aucun service IA n’est appelé dans cet aperçu.'}, 403
                 else: result = []
                 binary=isinstance(result,bytes)
-                body = result if binary else json.dumps(result, ensure_ascii=False, default=str).encode()
+                body = b'' if status == 204 else result if binary else json.dumps(result, ensure_ascii=False, default=str).encode()
                 self.send_response(status)
                 self.send_header('Content-Type', 'image/webp' if binary else 'application/json; charset=utf-8')
                 self.send_header('Cache-Control','no-store')
@@ -249,10 +250,23 @@ class UserOAuthConnection(models.Model):
                     process_one()
                     if '--experience' in sys.argv:
                         from watches.models import WatchItem,WatchArtwork
-                        from watches.artwork import normalize
-                        for item in WatchItem.objects.filter(owner=user,kind='topic',source_status='pending',artwork__isnull=True):
-                            WatchArtwork.objects.create(watch=item,content=normalize((root/'scripts/fixtures/watches/career-preview.png').read_bytes()),
-                                theme='career',published_at=timezone.now())
+                        from watches.artwork import normalize,input_digest,COVER_FORMAT
+                        samples = {
+                            'topic':('career','Une porte s’ouvre','Votre candidature'),
+                            'github_notification':('github','À vous de jouer','Revue GitHub'),
+                            'echo_conversation':('weekend','Prendre le large','Sortie du week-end'),
+                        }
+                        for item in WatchItem.objects.filter(owner=user,kind__in=samples,source_status='pending',handled_at__isnull=True):
+                            image,_=WatchArtwork.objects.get_or_create(watch=item)
+                            if image.layout == COVER_FORMAT and image.input_digest == input_digest(item) and image.published_at:
+                                continue
+                            filename,title,subtitle=samples[item.kind]
+                            image.content=normalize((root/f'src/dev/watch-covers/assets/{filename}.png').read_bytes())
+                            image.theme='code' if filename=='github' else 'career' if filename=='career' else 'travel'
+                            image.layout=COVER_FORMAT;image.input_digest=input_digest(item)
+                            image.title=title;image.subtitle=subtitle;image.published_at=timezone.now()
+                            image.save()
+
         else:
             server.serve_forever()
     suite = unittest.defaultTestLoader.loadTestsFromNames(['watches.tests', 'watches.test_engine', 'watches.test_topics', 'watches.test_agents', 'watches.test_artwork_push', 'watches.test_github'])

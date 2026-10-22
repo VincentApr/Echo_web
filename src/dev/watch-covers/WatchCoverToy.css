@@ -1,0 +1,18 @@
+/* The bitmap includes the complete composition and lettering. Only the existing glass remains above it. */
+.watch-home--covers .watch-card__cover {
+    position:absolute;
+    inset:0;
+    display:block;
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    opacity:1;
+    border-radius:inherit;
+    user-select:none;
+}
+.watch-home--covers .watch-card:focus-visible { outline:2px solid var(--echo-green); outline-offset:3px; }
+@media(max-width:800px) {
+    .app-layout:has(.watch-home--covers) .sidebar__green-body { width:60px!important; }
+    .app-layout:has(.watch-home--covers) .sidebar__panel,
+    .app-layout:has(.watch-home--covers) .sidebar__resize-handle { display:none; }
+}

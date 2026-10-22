@@ -85,6 +85,12 @@ export function WebSocketProvider({ children }: { children: React.ReactNode }) {
             if (wsRef.current !== ws) return;
             try {
                 const data = JSON.parse(event.data);
+                if (data.type === 'group_membership_revoked' && Array.isArray(data.conversation_uuids)) {
+                    void Promise.allSettled(data.conversation_uuids.filter((uuid: unknown): uuid is string => typeof uuid === 'string')
+                        .map((uuid: string) => webDatabaseManager.deleteConversation(uuid, user.uuid)))
+                        .then(() => { void queryClient.invalidateQueries({ queryKey: ['conversations'] }); });
+                    return;
+                }
                 if (data.type === 'notification_friend_request' || data.type === 'notification_group_invitation') {
                     void queryClient.invalidateQueries({ queryKey: ['watches', user.uuid] });
                 }

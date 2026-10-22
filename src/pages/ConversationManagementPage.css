@@ -1164,3 +1164,23 @@
         border-radius: 18px;
     }
 }
+
+/* Familiar member actions stay beside the member, without nested menus. */
+.mgmt-page__member-controls { display:flex; flex-wrap:wrap; align-items:center; gap:2px; flex-shrink:0; }
+.mgmt-page__member-controls .mgmt-page__icon-btn { width:34px; height:34px; }
+.mgmt-page__member-controls .mgmt-page__moderation-danger { color:#b54b4b; }
+.mgmt-page__choice-buttons { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+.mgmt-page__choice-buttons button { padding:7px 12px; border-radius:16px; border:1px solid rgba(10,145,104,.16); font-size:12px; color:var(--text-secondary); background:rgba(255,255,255,.5); }
+.mgmt-page__choice-buttons button[aria-pressed=true] { background:rgba(10,145,104,.12); color:var(--echo-green); border-color:rgba(10,145,104,.35); }
+.mgmt-page__moderation-confirm { margin:10px 0; padding:14px; border-radius:14px; background:rgba(255,255,255,.6); display:flex; flex-direction:column; gap:10px; font-size:13px; }
+.mgmt-page__moderation-confirm input { min-width:0; padding:9px 12px; border:1px solid rgba(0,0,0,.1); border-radius:10px; background:rgba(255,255,255,.7); font:inherit; }
+.mgmt-page__moderation-error { display:flex; align-items:center; gap:8px; color:#a33d38; font-size:13px; margin:10px 0; }
+.mgmt-page__member-controls button:disabled,.mgmt-page__choice-buttons button:disabled { opacity:.45; cursor:default; }
+@media(max-width:600px) { .mgmt-page__member-row { flex-wrap:wrap; } .mgmt-page__member-controls { margin-left:50px; } }
+
+@media(max-width:800px) {
+    .app-layout--management .sidebar__green-body { width:60px!important; }
+    .app-layout--management .sidebar__panel,.app-layout--management .sidebar__resize-handle { display:none; }
+    .mgmt-page__moderation-confirm .mgmt-page__request-actions { flex-wrap:wrap; }
+    .mgmt-page__member-controls { flex-shrink:1; }
+}

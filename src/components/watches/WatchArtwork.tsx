@@ -4,7 +4,7 @@ import { fetchWithAuth } from '../../services/apiClient';
 import { API_BASE_URL } from '../../config/api';
 import { preferences } from '../../services/watchNotifications';
 
-export function WatchArtwork({ kind, uuid, version }: { kind: string; uuid?: string; version?: string | null }) {
+export function useWatchArtworkImage(uuid?: string, version?: string | null) {
     const { user, isLoggedIn } = useAuth();
     // Observe a locally changed preference immediately, including when an old
     // feed is still in cache. The feed API is authoritative after a reload.
@@ -26,7 +26,12 @@ export function WatchArtwork({ kind, uuid, version }: { kind: string; uuid?: str
             });
         },
     });
-    if (enabled && image.data && !image.isError) return <img className="watch-art" src={image.data} alt="" loading="lazy" />;
+    return enabled && image.data && !image.isError ? image.data : undefined;
+}
+
+export function WatchArtwork({ kind, uuid, version }: { kind: string; uuid?: string; version?: string | null }) {
+    const image = useWatchArtworkImage(uuid, version);
+    if (image) return <img className="watch-art" src={image} alt="" loading="lazy" />;
     const group = kind === 'group_invitation';
     return <svg className="watch-art" viewBox="0 0 320 320" fill="none" aria-hidden="true">
         <rect width="320" height="320" fill={group ? '#d5d7e4' : '#d5e2d3'} />

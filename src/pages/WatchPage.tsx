@@ -3,7 +3,6 @@ import { IoChevronBack } from 'react-icons/io5';
 import { useNavigation } from '../contexts/NavigationContext';
 import { useWatch, useWatchAction } from '../hooks/useWatches';
 import { WatchArtwork } from '../components/watches/WatchArtwork';
-import { WatchList } from '../components/watches/WatchList';
 import { enrichConversation, type Conversation } from '../hooks/useConversations';
 import { fetchWithAuth } from '../services/apiClient';
 import { API_BASE_URL } from '../config/api';
@@ -18,7 +17,6 @@ export default function WatchPage() {
     const { user } = useAuth();
     const detail = useWatch(watchUuid);
     const action = useWatchAction(watchUuid);
-    const [showList, setShowList] = useState(false);
     const [opening, setOpening] = useState(false);
     const [navigationError, setNavigationError] = useState<string | null>(null);
     const seen = useRef(new Set<string>());
@@ -69,13 +67,13 @@ export default function WatchPage() {
     }, [item, action]);
     return <section className="conversation-thread watch-page">
         <header className="thread-header">
-            <button className="thread-back-btn" onClick={showList ? () => setShowList(false) : closeWatch} aria-label="Retour à l’accueil"><IoChevronBack size={22} /></button>
-            {item && <button className="thread-header-info" onClick={() => setShowList(!showList)} aria-expanded={showList} aria-label="Afficher les veilles">
+            <button className="thread-back-btn" onClick={closeWatch} aria-label="Retour à l’accueil"><IoChevronBack size={22} /></button>
+            {item && <div className="thread-header-info watch-header__info">
                 <span className="thread-header-avatar watch-header__avatar"><WatchArtwork kind={item.kind} uuid={item.uuid} version={item.artwork_version} /></span>
                 <span className="thread-header-name" title={item.title}>{item.title}</span>
-            </button>}
+            </div>}
         </header>
-        {showList ? <div className="watch-inline-list"><WatchList onChoose={() => setShowList(false)} /></div> : <div className="watch-page__scroll">
+        <div className="watch-page__scroll">
             {detail.isLoading && <p role="status">Chargement…</p>}
             {detail.isError && <div className="watch-notice" role="alert"><p>{detail.error.message}</p><button onClick={() => void detail.refetch()}>Réessayer</button></div>}
             {item && <div className="watch-detail">
@@ -89,6 +87,6 @@ export default function WatchPage() {
                 {action.isError && <p className="watch-error" role="alert">{action.error.message}</p>}
                 {navigationError && !action.isError && <p className="watch-error" role="alert">{navigationError}</p>}
             </div>}
-        </div>}
+        </div>
     </section>;
 }

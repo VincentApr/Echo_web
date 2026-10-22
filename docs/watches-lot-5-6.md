@@ -23,12 +23,20 @@ Un aide-mémoire est aussi présent dans le dépôt backend : `watches/DEPLOYMEN
 
 ## Ce qui est livré
 
-- Illustrations générées par l'outil image de Mistral, dans une direction artistique
-  commune. La grille, les ombres et le léger effet verre validés restent identiques.
-- Génération dans le worker, au plus deux nouvelles illustrations par passage et
-  quatre tentatives par utilisateur sur une fenêtre de vingt-quatre heures par
-  défaut. Une image publiée est conservée quand le sujet évolue. Les échecs attendent
-  six heures avant une nouvelle tentative, avec trois tentatives au maximum.
+- Pochettes d'album complètes pour les sujets intelligents : image, titre et sous-titre
+  générés ensemble. Signature typographique commune, mais compositions, matières et
+  palettes variées (sculpture, collage, graphisme, photographie éditoriale). La pochette
+  GitHub validée est un repère de qualité, pas un fond commun à tous les sujets.
+- Conversations épinglées : uniquement la photo de la conversation (initiale si absente).
+  Demandes d'ami et invitations : modèles fixes avec noms exacts affichés en HTML,
+  sans appel IA. Les résumés de conversations Echo restent des sujets intelligents.
+- Génération dans le worker, au plus deux tentatives par passage et quatre sur une
+  fenêtre de vingt-quatre heures par utilisateur, par défaut. Le budget inclut les
+  erreurs et reste conservé lors d'un changement de sujet. Chaque révision a trois
+  essais au maximum, espacés de six heures. Une pochette ne change pas à chaque connexion.
+- Le texte réellement visible dans l'image est relu par un modèle de vision avant
+  publication. Une couverture incorrecte reste masquée ; le sujet garde son rendu
+  de secours et ses actions. Une révision du sujet invalide sa couverture précédente.
 - Préférences dans « Fonctionnalités IA » : illustrations, notifications, plafond
   quotidien, heures calmes et fuseau horaire. L'arrêt général de l'IA est respecté.
 - Web Push avec abonnement volontaire par appareil, service worker et lien vers
@@ -47,20 +55,36 @@ normalisées en WebP 512 × 512, sans métadonnées d'origine, limitées à 200 
 stockées en base. Ce choix évite de rendre publiques des URL de stockage ; un
 stockage objet privé pourra remplacer les octets en base si le volume le justifie.
 Les images de sujets traités/expirés depuis trente jours sont purgées au passage
-du générateur. La limite de tentatives peut être conservatrice lors d'un échec
-ancien suivi d'une nouvelle tentative.
+du générateur. `WatchArtworkAttempt` conserve un registre distinct des tentatives
+pour appliquer le budget indépendamment du cache et des révisions des sujets.
 
-Le modèle texte choisit un motif parmi une liste fermée. L'outil image ne reçoit
-que ce motif générique et la direction artistique : aucun nom, extrait de mail,
-identifiant utilisateur ou titre de dépôt. Les images d'exemple locales proviennent
-du skill imagegen ; les générations exécutées par l'application passent par Mistral.
-Pour les demandes d'amis/invitations, le motif est fixe : leurs textes ne sont
-pas envoyés au modèle de classification.
+Le modèle texte prépare un titre court, un sous-titre et un thème à partir du résumé
+autorisé. Le générateur d'images reçoit uniquement ces deux textes courts et les
+consignes artistiques : ni source brute, ni résumé complet, ni identifiant utilisateur.
+Les consignes interdisent noms complets, adresses, liens et détails sensibles dans la
+copie de couverture. Les textes retenus sont nécessairement envoyés au fournisseur
+image, contrairement à l'ancienne génération de motifs entièrement génériques.
+
+Le contrôle vision reçoit uniquement l'image et doit transcrire les mots qu'il lit,
+sans connaître le texte attendu ; le serveur compare les transcriptions. Ce contrôle
+réduit les erreurs, mais la qualité du modèle choisi reste à vérifier en recette réelle.
+Les deux modèles natifs publics ne contiennent aucune donnée utilisateur ; les noms
+sont ajoutés dans le navigateur et ne sont pas transmis à un générateur.
 
 La route `GET /watches/<uuid>/artwork/` exige le propriétaire authentifié, les
 droits actuels sur toutes les sources et l'autorisation IA. Les réponses sont
-`private, no-store`. Le frontend utilise la même image pour la grille, la liste
-latérale et le header, avec le visuel vectoriel existant comme repli.
+`private, no-store`. Les pochettes périmées ne sont plus servies. Le champ `cover`
+de l'API indique le format `album_v1` et ses deux textes. Le frontend affiche la
+pochette entière sans ajouter de texte ou de dégradé. En attendant une image valide,
+il affiche un modèle sobre avec du texte HTML. Le verre 3D reste indépendant.
+
+Les exemples locaux et les deux fonds natifs proviennent de la compétence imagegen
+(outil intégré) ; le worker réel utilise Mistral. L'aperçu `5179` utilise le vrai
+frontend et les vrais endpoints de veilles, avec sources et images d'exemple fictives.
+
+Références API vérifiées :
+[outil image Mistral](https://docs.mistral.ai/studio/agents/agent-tools/image_generation),
+[entrée image et vision Mistral](https://docs.mistral.ai/studio/conversations/vision).
 
 ## Notifications : comportement précis
 
@@ -125,7 +149,7 @@ Ces commandes sont documentées, pas exécutées sur une base ou un compte réel
 
 1. Déployer le backend actuel de `api.echosocial.fr` avec ses dépendances, dont
    `pywebpush==2.5.0`. Appliquer les migrations watches jusqu'à
-   `0005_artwork_and_web_push` et `0006_github_watches`, après les lots précédents.
+   `0005_artwork_and_web_push`, `0006_github_watches` et `0007_album_covers`, après les lots précédents.
    Depuis la racine de ce dépôt backend, la vérification puis l'application se font
    avec `python manage.py showmigrations watches` et `python manage.py migrate`.
    Le Procfile existant contient déjà une migration au démarrage du processus web ;
@@ -139,7 +163,12 @@ Ces commandes sont documentées, pas exécutées sur une base ou un compte réel
    ```
 
    Reporter l'identifiant affiché dans `WATCHES_IMAGE_AGENT_ID`.
+   Si l'ancien agent existe déjà, recréer cet agent dédié avec la commande mise à
+   jour : ses anciennes instructions interdisaient tout texte dans les images.
    `WATCHES_IMAGES_PER_DAY=4` est la valeur par défaut.
+   `WATCHES_IMAGE_REVIEW_MODEL=mistral-small-latest` désigne le modèle de vision
+   qui relit les couvertures ; choisir un modèle vision disponible sur le compte.
+   Appliquer aussi la migration `watches.0007_album_covers` (métadonnées et quota).
 4. Générer une paire VAPID stable avec `py_vapid`, par exemple `vapid --gen`,
    puis `vapid --applicationServerKey`. Configurer :
 
@@ -223,10 +252,16 @@ ECHO_WATCH_PREVIEW_MODE=experience ECHO_TEST_PYTHON=/chemin/vers/python node scr
 ```
 
 Ouvrir `http://127.0.0.1:5179/` (API en mémoire : 8006). Les données Gmail/GitHub
-sont fictives, l'illustration de candidature est un exemple IA pré-généré et aucune
-notification réelle ni connexion à un compte externe n'est déclenchée. Les réglages
-et le service des images utilisent la vraie API locale. L'illustration et sa
-consigne sont dans [scripts/fixtures/watches](../scripts/fixtures/watches/README.md).
+sont fictives ; les trois pochettes intelligentes sont des exemples IA pré-générés.
+Aucune notification réelle ni connexion à un compte externe n'est déclenchée. Les
+réglages et le service des images utilisent la vraie API locale. Les pochettes
+d'essai sont dans `src/dev/watch-covers/assets/` et leurs consignes dans
+`scripts/fixtures/watch-covers/prompts.json`. Les modèles natifs sont dans
+`public/watch-covers/` et leur provenance dans son `README.md`.
+
+Sur une machine avec peu de RAM, ne lancer qu'un aperçu à la fois. Les tests
+Playwright locaux utilisent désormais un seul worker par défaut ; conserver
+`--workers=1` si la commande est personnalisée. Fermer l'aperçu avant les tests.
 
 ## Références officielles
 

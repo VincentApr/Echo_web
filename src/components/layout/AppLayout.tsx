@@ -45,7 +45,7 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const userName = user?.username || user?.first_name || undefined;
 
   return (
-    <div className={`app-layout ${currentPage === 'watch' ? 'app-layout--watch' : ''}`}>
+    <div className={`app-layout ${currentPage === 'watch' ? 'app-layout--watch' : ''} ${conversationView === 'management' ? 'app-layout--management' : ''}`}>
       <div className="app-layout__body">
         <Sidebar
           activePage={currentPage}

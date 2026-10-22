@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
     IoAddCircleOutline,
     IoAlertCircleOutline,
@@ -29,6 +29,11 @@ import {
     IoSparklesOutline,
     IoStar,
     IoStarOutline,
+    IoVolumeMuteOutline,
+    IoVolumeHighOutline,
+    IoPauseOutline,
+    IoPlayOutline,
+    IoShieldOutline,
 } from 'react-icons/io5';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
@@ -77,7 +82,15 @@ interface GroupMember {
     joined_at?: string;
     is_muted?: boolean;
     muted_until?: string | null;
+    is_banned?: boolean;
+    ban_reason?: string;
+    is_ai_blocked?: boolean;
+    is_active?: boolean;
 }
+
+interface ModeratedAgent { uuid: string; name: string; is_blocked: boolean; is_automatic: boolean }
+type MemberAction = 'mute' | 'unmute' | 'kick' | 'ban' | 'unban' | 'promote' | 'demote' | 'block_ai' | 'unblock_ai';
+const moderationLabels: Record<string, string> = { mute: 'Rendre muet', unmute: 'Rétablir la parole', kick: 'Exclure', ban: 'Bannir', unban: 'Lever le bannissement', promote: 'Nommer modérateur', demote: 'Retirer le rôle de modérateur', block_ai: 'Retirer l’accès aux agents IA', unblock_ai: 'Rétablir l’accès aux agents IA', promote_moderator: 'Promotion modérateur', demote_moderator: 'Retrait du rôle de modérateur', ai_policy_changed: 'Politique IA modifiée', ai_blocked: 'Accès IA retiré', ai_unblocked: 'Accès IA rétabli', agent_blocked: 'Agent suspendu', agent_unblocked: 'Agent réautorisé' };
 
 interface GroupMembership {
     role?: GroupRole;
@@ -91,6 +104,7 @@ interface GroupDetails {
     avatar?: string | null;
     invite_code?: string;
     parent: number | null;
+    ai_agent_policy?: 'everyone' | 'admins_only' | 'disabled';
     max_members?: number;
     member_count: number;
     created_at?: string;
@@ -250,6 +264,15 @@ export default function ConversationManagementPage({ conversation }: Props) {
     const [myGroups, setMyGroups] = useState<GroupSummary[]>([]);
     const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
     const [moderationLogs, setModerationLogs] = useState<ModerationLog[]>([]);
+    const [bannedMembers, setBannedMembers] = useState<GroupMember[]>([]);
+    const [moderatedAgents, setModeratedAgents] = useState<ModeratedAgent[]>([]);
+    const [moderationReady, setModerationReady] = useState(false);
+    const [moderationError, setModerationError] = useState<string | null>(null);
+    const [moderationBusy, setModerationBusy] = useState(false);
+    const confirmationRef = useRef<HTMLFormElement>(null);
+    const [moderationDraft, setModerationDraft] = useState<{ member: GroupMember; action: MemberAction } | null>(null);
+    const [muteHours, setMuteHours] = useState<number | null>(24);
+    const [moderationReason, setModerationReason] = useState('');
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
     const [agentDetail, setAgentDetail] = useState<AgentDetail | null>(null);
     const [connections, setConnections] = useState<Connection[]>([]);
@@ -398,6 +421,77 @@ export default function ConversationManagementPage({ conversation }: Props) {
         }
     };
 
+    const loadModeration = async (targetGroupUuid: string) => {
+        try {
+            const response = await fetchWithAuth(`${API_BASE_URL}/groups/${targetGroupUuid}/moderation/`);
+            if (!response.ok) throw new Error('Impossible de charger la modération du groupe.');
+            const data = await response.json();
+            setBannedMembers(data.banned_members);
+            setModeratedAgents(data.agents);
+            setModerationReady(true);
+            setModerationError(null);
+        } catch (error) {
+            setModerationReady(false);
+            setModerationError(error instanceof Error ? error.message : 'Modération indisponible.');
+        }
+    };
+
+    const canModerateMember = (member: GroupMember) => canModerateGroup && getMemberUuid(member) !== user?.uuid
+        && member.role !== 'owner' && (myGroupRole === 'owner' || member.role !== 'moderator');
+
+    const startModeration = (member: GroupMember, action: MemberAction) => {
+        setModerationDraft({ member, action });
+        setModerationReason('');
+        setMuteHours(24);
+        setModerationError(null);
+    };
+
+    const submitModeration = async (path: string, data: Record<string, unknown>) => {
+        if (!groupDetails?.uuid || moderationBusy) return;
+        setModerationBusy(true);
+        setModerationError(null);
+        try {
+            const response = await fetchWithAuth(`${API_BASE_URL}/groups/${groupDetails.uuid}/${path}`, {
+                method: 'PATCH', body: JSON.stringify(data),
+            });
+            if (!response.ok) throw new Error(parseErrorMessage(await response.json().catch(() => null), 'Action impossible.'));
+            setModerationDraft(null);
+            // Reload authoritative state instead of displaying a sanction before the server accepts it.
+            const detailResponse = await fetchWithAuth(`${API_BASE_URL}/groups/${groupDetails.uuid}/`);
+            if (!detailResponse.ok) throw new Error('Action effectuée. Actualisez le groupe pour voir son état.');
+            const detail = await detailResponse.json() as GroupDetails;
+            setGroupDetails(detail);
+            setGroupMembers(detail.members || []);
+            await loadModeration(groupDetails.uuid);
+            if (showModerationLogs) await loadModerationLogs(groupDetails.uuid);
+            void queryClient.invalidateQueries({ queryKey: ['conversations'] });
+            notify('Modification enregistrée');
+        } catch (error) {
+            setModerationError(error instanceof Error ? error.message : 'Action impossible.');
+        } finally { setModerationBusy(false); }
+    };
+
+    useEffect(() => {
+        if (moderationDraft) confirmationRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }, [moderationDraft]);
+
+    const confirmMemberAction = () => {
+        if (!moderationDraft) return;
+        const { member, action } = moderationDraft;
+        const aiAction = action === 'block_ai' || action === 'unblock_ai';
+        void submitModeration(`members/${getMemberUuid(member)}/${aiAction ? 'ai-block/' : ''}`, {
+            action: aiAction ? (action === 'block_ai' ? 'block' : 'unblock') : action,
+            reason: moderationReason.trim(),
+            ...(action === 'mute' && muteHours !== null ? { duration_hours: muteHours } : {}),
+        });
+    };
+
+    const memberActionButton = (member: GroupMember, action: MemberAction, icon: React.ReactNode) => (
+        <button type="button" className={`mgmt-page__icon-btn ${action === 'ban' || action === 'kick' ? 'mgmt-page__moderation-danger' : ''}`}
+            disabled={moderationBusy || !moderationReady} aria-label={`${moderationLabels[action]} · ${getMemberDisplayName(member)}`}
+            title={moderationLabels[action]} onClick={() => startModeration(member, action)}>{icon}</button>
+    );
+
     const loadGroupBundle = async (targetGroupUuid: string) => {
         setLoading(true);
         try {
@@ -406,12 +500,14 @@ export default function ConversationManagementPage({ conversation }: Props) {
             const detail = (await detailRes.json()) as GroupDetails;
             setGroupDetails(detail);
             setGroupMembers(detail.members || []);
+            const role = extractGroupRole(detail.my_membership);
+            if (role === 'owner' || role === 'moderator') await loadModeration(targetGroupUuid);
 
             const [statsResult, groupsResult, membersResult, approvalsResult] = await Promise.allSettled([
                 fetchWithAuth(`${API_BASE_URL}/groups/${targetGroupUuid}/stats/`),
                 fetchWithAuth(`${API_BASE_URL}/groups/my-groups/`),
                 fetchWithAuth(`${API_BASE_URL}/groups/${targetGroupUuid}/members/`),
-                canModerateGroup || extractGroupRole(detail.my_membership)
+                ['owner', 'moderator'].includes(extractGroupRole(detail.my_membership) || '')
                     ? fetchWithAuth(`${API_BASE_URL}/groups/${targetGroupUuid}/pending-approvals/`)
                     : Promise.resolve(null),
             ]);
@@ -1106,6 +1202,15 @@ export default function ConversationManagementPage({ conversation }: Props) {
                                         <span className="mgmt-page__subsection-label">MEMBRES ({groupMembers.length || groupDetails.member_count})</span>
                                     </div>
 
+                                    {canModerateGroup && moderationError && <div className="mgmt-page__moderation-error" role="alert">{moderationError} <button className="mgmt-page__icon-btn" aria-label="Actualiser la modération" onClick={() => groupDetails && void loadModeration(groupDetails.uuid)}><IoRefreshOutline size={16} /></button></div>}
+                                    {moderationDraft && <form ref={confirmationRef} className="mgmt-page__moderation-confirm" onSubmit={event => { event.preventDefault(); confirmMemberAction(); }}>
+                                        <strong>{moderationLabels[moderationDraft.action]} · {getMemberDisplayName(moderationDraft.member)}</strong>
+                                        {moderationDraft.action === 'mute' && <div className="mgmt-page__choice-buttons" role="group" aria-label="Durée du mute">
+                                            {([[1, '1 h'], [24, '24 h'], [168, '7 jours'], [null, 'Illimité']] as const).map(([hours, label]) => <button type="button" key={label} aria-pressed={muteHours === hours} onClick={() => setMuteHours(hours)} disabled={moderationBusy}>{label}</button>)}
+                                        </div>}
+                                        {['mute', 'ban', 'kick', 'block_ai'].includes(moderationDraft.action) && <input aria-label="Motif" placeholder={moderationDraft.action === 'block_ai' ? 'Motif' : 'Motif (facultatif)'} maxLength={500} value={moderationReason} onChange={event => setModerationReason(event.target.value)} required={moderationDraft.action === 'block_ai'} disabled={moderationBusy} />}
+                                        <div className="mgmt-page__request-actions"><button type="button" className="mgmt-page__secondary-btn" disabled={moderationBusy} onClick={() => setModerationDraft(null)}>Annuler</button><button type="submit" className="mgmt-page__primary-btn" disabled={moderationBusy}>{moderationBusy ? 'En cours…' : 'Confirmer'}</button></div>
+                                    </form>}
                                     <div className="mgmt-page__members">
                                         {membersToDisplay.map((member, index) => (
                                             <div key={getMemberUuid(member) || `member-${index}`} className="mgmt-page__member-row">
@@ -1122,6 +1227,7 @@ export default function ConversationManagementPage({ conversation }: Props) {
                                                         <span className="mgmt-page__member-role">
                                                             {member.role === 'owner' ? '👑 Propriétaire' : member.role === 'moderator' ? '⭐ Modérateur' : 'Membre'}
                                                         </span>
+                                                        {member.is_ai_blocked && <span className="mgmt-page__member-muted">Accès IA suspendu</span>}
                                                         {member.is_muted ? (
                                                             <span className="mgmt-page__member-muted">
                                                                 Muté{member.muted_until ? ` jusqu'au ${formatDateTime(member.muted_until)}` : ''}
@@ -1129,6 +1235,13 @@ export default function ConversationManagementPage({ conversation }: Props) {
                                                         ) : null}
                                                     </div>
                                                 </div>
+                                                {canModerateMember(member) && <div className="mgmt-page__member-controls">
+                                                    {memberActionButton(member, member.is_muted ? 'unmute' : 'mute', member.is_muted ? <IoVolumeHighOutline size={18} /> : <IoVolumeMuteOutline size={18} />)}
+                                                    {memberActionButton(member, member.is_ai_blocked ? 'unblock_ai' : 'block_ai', <IoSparklesOutline size={18} />)}
+                                                    {myGroupRole === 'owner' && memberActionButton(member, member.role === 'moderator' ? 'demote' : 'promote', <IoShieldOutline size={18} />)}
+                                                    {memberActionButton(member, 'kick', <IoExitOutline size={18} />)}
+                                                    {memberActionButton(member, 'ban', <IoBanOutline size={18} />)}
+                                                </div>}
                                             </div>
                                         ))}
                                     </div>
@@ -1141,6 +1254,23 @@ export default function ConversationManagementPage({ conversation }: Props) {
                                 </div>
                             </section>
                         )}
+
+                        {isGroup && canModerateGroup && <section className="mgmt-page__section">
+                            <h2 className="mgmt-page__section-title">Agents IA</h2>
+                            <div className="mgmt-page__choice-buttons" role="group" aria-label="Qui peut utiliser les agents IA">
+                                {([['everyone', 'Tous les membres'], ['admins_only', 'Responsables'], ['disabled', 'Personne']] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={groupDetails?.ai_agent_policy === value} disabled={moderationBusy || !moderationReady} onClick={() => void submitModeration('ai-policy/', { ai_agent_policy: value })}>{label}</button>)}
+                            </div>
+                            {moderatedAgents.map(agent => <div key={agent.uuid} className="mgmt-page__member-row">
+                                <div className="mgmt-page__member-left"><div className="mgmt-page__member-avatar-placeholder"><IoSparklesOutline size={20} /></div><div className="mgmt-page__member-info"><span className="mgmt-page__member-name">{agent.name}</span><span className="mgmt-page__member-role">{agent.is_blocked ? 'Suspendu' : agent.is_automatic ? 'Automatique' : 'Manuel'}</span></div></div>
+                                <button className="mgmt-page__icon-btn" aria-label={`${agent.is_blocked ? 'Réautoriser' : 'Suspendre'} · ${agent.name}`} title={agent.is_blocked ? 'Réautoriser dans ce groupe' : 'Suspendre dans ce groupe'} disabled={moderationBusy || !moderationReady} onClick={() => void submitModeration(`agents/${agent.uuid}/moderation/`, { action: agent.is_blocked ? 'unblock' : 'block' })}>{agent.is_blocked ? <IoPlayOutline size={18} /> : <IoPauseOutline size={18} />}</button>
+                            </div>)}
+                            {moderationReady && moderatedAgents.length === 0 && <p className="mgmt-page__muted-text">Aucun agent utilisé dans ce groupe.</p>}
+                        </section>}
+
+                        {isGroup && canModerateGroup && bannedMembers.length > 0 && <section className="mgmt-page__section">
+                            <h2 className="mgmt-page__section-title">Personnes bannies ({bannedMembers.length})</h2>
+                            {bannedMembers.map(member => <div key={getMemberUuid(member)} className="mgmt-page__member-row"><div className="mgmt-page__member-info"><span className="mgmt-page__member-name">{getMemberDisplayName(member)}</span>{member.ban_reason && <span className="mgmt-page__member-role">{member.ban_reason}</span>}</div>{canModerateMember(member) && memberActionButton(member, 'unban', <IoCheckmarkCircleOutline size={19} />)}</div>)}
+                        </section>}
 
                         {isGroup && (
                             <section className="mgmt-page__section">
@@ -1296,7 +1426,7 @@ export default function ConversationManagementPage({ conversation }: Props) {
                                                             {moderationLogs.map((log) => (
                                                                 <div key={log.uuid} className="mgmt-page__log-row">
                                                                     <span className="mgmt-page__log-title">
-                                                                        {log.action} · {getUserDisplayName(log.target_user)}
+                                                                        {moderationLabels[log.action] || log.action}{log.target_user ? ` · ${getUserDisplayName(log.target_user)}` : ''}
                                                                     </span>
                                                                     <span className="mgmt-page__log-meta">
                                                                         Par {getUserDisplayName(log.moderator)} le {formatDateTime(log.created_at)}

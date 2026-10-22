@@ -17,6 +17,7 @@ export interface WatchItem {
     priority?: number;
     expires_at?: string | null;
     artwork_version?: string | null;
+    cover?: { layout: 'album_v1'; title: string; subtitle: string } | null;
     actions: WatchChoice[];
     navigation?: { type: 'external'; url: string } | { type: 'conversation'; uuid: string }
         | { type: 'agent_conversation'; uuid: string; agent_uuid: string; agent_name: string;

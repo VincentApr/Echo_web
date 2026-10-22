@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 import type { WatchItem } from '../../src/services/watches';
 
@@ -13,7 +14,7 @@ const topicId = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const agentId = '99999999-9999-4999-8999-999999999999';
 const agentThreadId = '88888888-8888-4888-8888-888888888888';
 const watchDraft = 'Aide-moi à préparer ma réponse.\n\nContexte de la veille : votre candidature est retenue et un entretien est prévu demain.';
-async function setup(page: Page, failAction = false, generated = false, grouped = false, recommended = false) {
+async function setup(page: Page, failAction = false, generated = false, grouped = false, recommended = false, album = false, failImage = false) {
     const actions: string[] = [];
     const scans: string[] = [];
     const targets: string[] = [];
@@ -25,6 +26,10 @@ async function setup(page: Page, failAction = false, generated = false, grouped 
         {...items[0], uuid:emailId, kind:'email_thread', title:'Une réponse pour votre stage', summary:'Votre candidature est retenue. Un entretien vous est proposé mardi.', payload:{actor:'Recrutement',source_label:'Gmail'}, actions:[{id:'open_source',label:'Consulter le mail'},{id:'dismiss',label:'Masquer'}]},
         {...items[0], uuid:echoId, kind:'echo_conversation', title:'Organiser la sortie', summary:'Lucas attend votre choix de créneau.', payload:{actor:'Lucas',source_label:'Conversation Echo'}, actions:[{id:'open_source',label:'Ouvrir la conversation'},{id:'dismiss',label:'Masquer'}]},
     );
+    if (album) for (const item of items.filter(item => !['friend_request','group_invitation'].includes(item.kind))) {
+        item.artwork_version = 'album-version';
+        item.cover = {layout:'album_v1', title:item.title, subtitle:'Votre veille'};
+    }
     if (grouped) {
         const index = items.findIndex(item=>item.uuid===emailId);
         items[index] = {...items[index],uuid:topicId,kind:'topic',title:'Votre candidature de stage',
@@ -49,6 +54,10 @@ async function setup(page: Page, failAction = false, generated = false, grouped 
         if (path === '/watches/') {
             const history = new URL(route.request().url()).searchParams.get('scope') === 'history';
             return route.fulfill({ json: { results: items.filter(item => history ? item.handled_at : !item.handled_at && !item.snoozed_until), count:2, next_offset:null, checked_at:new Date().toISOString() } });
+        }
+        if (path.endsWith('/artwork/')) {
+            if (failImage) return route.fulfill({status:503,json:{detail:'Indisponible'}});
+            return route.fulfill({contentType:'image/webp',body:readFileSync('public/watch-covers/friend.webp')});
         }
         if (path.startsWith('/watches/')) {
             const item = items.find(item => path.includes(item.uuid));
@@ -75,8 +84,8 @@ async function setup(page: Page, failAction = false, generated = false, grouped 
             }
             return route.fulfill({json:item});
         }
-        if (path === '/messaging/conversations/private/') return route.fulfill({json:[{uuid:'pinned',name:'Conversation épinglée',conversation_type:'direct',unread_count:0,other_participant:{uuid:'friend',username:'Conversation épinglée'}}]});
-        if (path === '/messaging/conversations/pinned/') return route.fulfill({json:{uuid:'pinned',conversation_type:'direct',unread_count:0,other_participant:{uuid:'friend',username:'Conversation épinglée'}}});
+        if (path === '/messaging/conversations/private/') return route.fulfill({json:[{uuid:'pinned',name:'Conversation épinglée',conversation_type:'direct',unread_count:0,other_participant:{uuid:'friend',username:'Conversation épinglée',photo_profil_url:'/watch-covers/friend.webp'}}]});
+        if (path === '/messaging/conversations/pinned/') return route.fulfill({json:{uuid:'pinned',conversation_type:'direct',unread_count:0,other_participant:{uuid:'friend',username:'Conversation épinglée',photo_profil_url:'/watch-covers/friend.webp'}}});
         if (recommended && path === '/messaging/conversations/agents/') return route.fulfill({json:[{
             uuid:agentThreadId,conversation_type:'ai_agent',unread_count:0,
             framework_agent:{uuid:agentId,name:'Recherche de stage',avatar_url:''}}]});
@@ -134,7 +143,7 @@ test('pinned conversations lead the grid and a watch has a stable detail layout 
     await page.getByRole('button',{name:/Lucas souhaite/}).click();
     await expect(page).toHaveURL(new RegExp(`/veilles/${friendId}`));
     await expect(page.locator('.watch-summary')).toContainText('Lucas vous a envoyé une demande d’ami.');
-    await expect(page.locator('.watch-page .thread-header > button')).toHaveCount(2);
+    await expect(page.locator('.watch-page .thread-header > button')).toHaveCount(1);
     await expect(page.locator('.watch-page .thread-header-info .thread-header-name')).toHaveText('Lucas souhaite vous ajouter');
     await expect(page.locator('.watch-page h2')).toHaveCount(0);
     await expect(page.locator('.web-bottom-bar')).toHaveCount(0);
@@ -173,12 +182,15 @@ test('failure keeps the source actionable and browser back returns to the grid',
     await expect(page.locator('.watch-grid')).toBeVisible();
 });
 
-test('snooze removes the item without answering and mobile list opens another watch', async ({page}) => {
+test('the watch header is inert and mobile navigation keeps snooze separate from answering', async ({page}) => {
     const fixture = await setup(page);
     await page.setViewportSize({width:390,height:844});
     await page.getByRole('button',{name:/Lucas souhaite/}).click();
-    await page.getByRole('button',{name:'Afficher les veilles'}).click();
-    await page.locator('.watch-inline-list').getByRole('button',{name:/Rejoignez Randonnées/}).click();
+    await page.locator('.watch-page .thread-header-info').click();
+    await expect(page).toHaveURL(new RegExp(`/veilles/${friendId}`));
+    await expect(page.locator('.watch-inline-list')).toHaveCount(0);
+    await page.getByRole('button',{name:'Retour à l’accueil'}).click();
+    await page.getByRole('button',{name:/Rejoignez Randonnées/}).click();
     await expect(page.locator('.watch-summary')).toContainText('Léa vous invite');
     await expect(page.getByRole('button',{name:'Rejoindre le groupe'})).toBeEnabled();
     await page.getByRole('button',{name:'Plus tard'}).click();
@@ -189,24 +201,27 @@ test('snooze removes the item without answering and mobile list opens another wa
 });
 
 
-test('the home contains compact fixed squares with titles and details inside', async ({page}) => {
+test('the home keeps fixed squares, photo-only pins and readable native templates', async ({page}) => {
     await setup(page);
     await expect(page.locator('.watch-home > header')).toHaveCount(0);
     await expect(page.locator('.watch-home h1, .watch-home h2')).toHaveCount(0);
     await expect(page.getByRole('button',{name:'À suivre',exact:true})).toHaveCount(0);
     const grid = page.locator('.watch-grid');
     expect(await grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(9);
-    const card = grid.locator('.watch-card').first();
+    const pin = grid.locator('.watch-card').first();
+    await expect(pin.locator('img')).toHaveCount(1);
+    await expect(pin.locator('strong, small, .watch-card__shade')).toHaveCount(0);
+    const card = grid.locator('.watch-card--friend_request').first();
     const before = await card.boundingBox();
     expect(before?.width).toBe(125);
     expect(before?.height).toBe(125);
-    const title = await card.locator('.conv-square__name').boundingBox();
+    const title = await card.locator('.watch-card__fixed-copy strong').boundingBox();
     const detail = await card.locator('small').boundingBox();
     expect(title!.x).toBeGreaterThan(before!.x);
     expect(title!.y).toBeGreaterThan(before!.y);
     expect(title!.y + title!.height).toBeLessThanOrEqual(detail!.y);
     expect(detail!.y + detail!.height).toBeLessThan(before!.y + before!.height);
-    expect(await card.locator('.conv-square__name').evaluate(element => getComputedStyle(element).color)).toBe('rgb(255, 255, 255)');
+    expect(await card.locator('.watch-card__fixed-copy strong').evaluate(element => getComputedStyle(element).color)).toBe('rgb(62, 38, 58)');
     await page.setViewportSize({width:1000,height:1000});
     const after = await card.boundingBox();
     expect(after?.width).toBe(before?.width);
@@ -258,7 +273,7 @@ test('a combined topic has one card and opens each exact source from the same de
     await expect(page.getByRole('button',{name:/Une réponse pour votre stage/})).toHaveCount(0);
     await page.getByRole('button',{name:/Votre candidature de stage/}).click();
     await expect(page.locator('.watch-summary')).toContainText('Un entretien est prévu demain');
-    await expect(page.locator('.watch-page .thread-header > button')).toHaveCount(2);
+    await expect(page.locator('.watch-page .thread-header > button')).toHaveCount(1);
     await expect(page.locator('.web-bottom-bar')).toHaveCount(0);
     await page.getByRole('button',{name:'Consulter le mail',exact:true}).click();
     await expect(page).toHaveURL(/mail\.google\.com/);
@@ -290,4 +305,27 @@ test('a denied topic refresh removes the cached common summary from the open pag
     await expect(page.locator('.watch-summary')).toHaveCount(0);
     await expect(page.locator('.watch-page .thread-header-name')).toHaveCount(0);
     await expect(page.locator('.watch-list').getByRole('button',{name:'Votre candidature de stage',exact:true})).toHaveCount(0);
+});
+
+
+test('generated album covers have no text overlay while native events keep their fixed template', async ({page}) => {
+    await setup(page,false,true,false,false,true);
+    const card=page.getByRole('button',{name:'Une réponse pour votre stage — Votre veille'});
+    await expect(card).toHaveClass(/watch-card--album/);
+    await expect(card.locator('.watch-card__cover')).toBeVisible();
+    await expect(card.locator('strong,small,.watch-card__shade')).toHaveCount(0);
+    const friend=page.getByRole('button',{name:/Lucas souhaite/});
+    await expect(friend.locator('.watch-card__fixed-copy strong')).toHaveText('Lucas');
+    await expect(friend.locator('img')).toHaveAttribute('src','/watch-covers/friend.webp');
+    await card.click();
+    await expect(page.locator('.watch-summary')).toContainText('Votre candidature est retenue');
+});
+
+test('unavailable album artwork keeps a readable and clickable fallback', async ({page}) => {
+    await setup(page,false,true,false,false,true,true);
+    const card=page.getByRole('button',{name:'Une réponse pour votre stage — Votre veille'});
+    await expect(card).toHaveClass(/watch-card--pending/);
+    await expect(card.locator('strong')).toHaveText('Une réponse pour votre stage');
+    await card.click();
+    await expect(page.getByRole('button',{name:'Consulter le mail',exact:true})).toBeVisible();
 });
