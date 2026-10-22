@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     IoCheckmark, IoClose, IoCloudUploadOutline, IoDocumentTextOutline,
-    IoExtensionPuzzleOutline, IoLockClosedOutline, IoSearch, IoSparkles, IoStar, IoStarOutline,
+    IoLockClosedOutline, IoSearch, IoSparkles, IoStar, IoStarOutline,
     IoChatbubblesOutline, IoCalendarOutline, IoInformationCircleOutline, IoPeopleOutline,
-    IoCreateOutline, IoTrashOutline, IoGlobeOutline, IoCompassOutline, IoPersonOutline, IoAddOutline,
+    IoCreateOutline, IoTrashOutline, IoCompassOutline, IoPersonOutline, IoAddOutline,
 } from 'react-icons/io5';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
@@ -13,13 +13,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useConversations, type Conversation } from '../hooks/useConversations';
 import { webDatabaseManager } from '../services/webDatabase';
 import { TOOL_CATEGORIES, enrichAgent, getCategoryById, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
+import { ensureAgentFavorite } from '../services/agentFavorites';
 import './MarketplacePage.css';
 
 type MarketplaceView = 'catalog' | 'mine' | 'create';
 interface AgentDocument { id: string; name: string; content: string; size: number; }
-interface CreatorForm { name: string; description: string; systemPrompt: string; documentation: string; isPublic: boolean; }
+interface CreatorForm { name: string; description: string; systemPrompt: string; documentation: string; visibility: 'private' | 'friends'; }
 
-const EMPTY_FORM: CreatorForm = { name: '', description: '', systemPrompt: '', documentation: '', isPublic: false };
+const EMPTY_FORM: CreatorForm = { name: '', description: '', systemPrompt: '', documentation: '', visibility: 'private' };
 
 function normalizeAgentList(payload: unknown): BackendAgent[] {
     if (Array.isArray(payload)) return payload as BackendAgent[];
@@ -65,6 +66,8 @@ export default function MarketplacePage() {
     const [isCreating, setIsCreating] = useState(false);
     const [creatorError, setCreatorError] = useState<string | null>(null);
     const [creatorSuccess, setCreatorSuccess] = useState<string | null>(null);
+    const [pendingFavorite, setPendingFavorite] = useState<{ uuid: string; name: string } | null>(null);
+    const [retryingFavorite, setRetryingFavorite] = useState(false);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const { data: agents = [], isLoading } = useQuery({
@@ -78,7 +81,7 @@ export default function MarketplacePage() {
             const minePayload = mineResponse.ok ? await mineResponse.json() : [];
             const mine = normalizeAgentList(minePayload);
             const favoriteUuids = new Set(mine.filter((agent) => agent.is_favorite).map((agent) => agent.uuid));
-            return normalizeAgentList(publicPayload).map((agent) => enrichAgent({
+            return normalizeAgentList(publicPayload).filter((agent) => agent.visibility ? agent.visibility === 'public' : agent.is_public).map((agent) => enrichAgent({
                 ...agent,
                 is_favorite: Boolean(agent.is_favorite || favoriteUuids.has(agent.uuid)),
             }));
@@ -211,7 +214,7 @@ export default function MarketplacePage() {
                 ...updated,
                 is_mine: true,
                 is_favorite: updated.is_favorite ?? selectedAgent.isFavorite,
-                is_public: updated.is_public ?? (data.is_public as boolean | undefined) ?? selectedAgent.isPublic,
+                visibility: updated.visibility ?? (data.visibility as BackendAgent['visibility']) ?? selectedAgent.visibility,
             });
             setSelectedAgent(enriched);
             setEditForm({ name: enriched.name, description: enriched.description, systemPrompt: enriched.systemPrompt });
@@ -239,8 +242,7 @@ export default function MarketplacePage() {
     const toggleVisibility = async () => {
         if (!selectedAgent) return;
         await updateOwnedAgent({
-            visibility: selectedAgent.isPublic ? 'private' : 'public',
-            is_public: !selectedAgent.isPublic,
+            visibility: selectedAgent.visibility === 'private' ? 'friends' : 'private',
         });
     };
 
@@ -280,6 +282,19 @@ export default function MarketplacePage() {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const retryFavorite = async () => {
+        if (!pendingFavorite || retryingFavorite || isCreating) return;
+        setRetryingFavorite(true); setCreatorError(null);
+        try {
+            await ensureAgentFavorite(pendingFavorite.uuid);
+            setCreatorSuccess(`« ${pendingFavorite.name} » a été ajouté aux favoris.`);
+            setPendingFavorite(null);
+            await queryClient.invalidateQueries({ queryKey: ['agents'] });
+        } catch {
+            setCreatorError('Impossible de confirmer l’ajout aux favoris. Réessayez dans un instant.');
+        } finally { setRetryingFavorite(false); }
+    };
+
     const createAgent = async () => {
         if (!form.name.trim()) { setCreatorError("Donnez un nom à l'agent."); return; }
         if (!form.systemPrompt.trim() && !form.documentation.trim() && documents.length === 0) {
@@ -296,21 +311,30 @@ export default function MarketplacePage() {
                 : '',
         ].filter(Boolean).join('\n\n');
 
+        setPendingFavorite(null);
         setIsCreating(true); setCreatorError(null); setCreatorSuccess(null);
         try {
             const response = await fetchWithAuth(`${API_BASE_URL}/framework/agents/mistral/`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     name: form.name.trim(), description: form.description.trim(), system_prompt: systemPrompt,
-                    visibility: form.isPublic ? 'public' : 'private', is_public: form.isPublic,
+                    visibility: form.visibility,
                 }),
             });
             if (!response.ok) throw new Error(await readError(response, "Impossible de créer l'agent."));
+            const created = await response.json() as BackendAgent;
             const createdName = form.name.trim();
-            const wasPublic = form.isPublic;
-            setCreatorSuccess(`« ${createdName} » a été créé.`); setForm(EMPTY_FORM); setDocuments([]);
+            setForm(EMPTY_FORM); setDocuments([]);
+            setPendingFavorite({ uuid: created.uuid, name: createdName });
+            try {
+                await ensureAgentFavorite(created.uuid);
+                setPendingFavorite(null);
+                setCreatorSuccess(`« ${createdName} » a été créé et ajouté aux favoris.`);
+            } catch {
+                setCreatorSuccess(`« ${createdName} » a été créé.`);
+                setCreatorError('L’ajout aux favoris n’a pas pu être confirmé. Vous pouvez réessayer sans recréer l’agent.');
+            }
             await queryClient.invalidateQueries({ queryKey: ['agents'] });
-            if (wasPublic) await queryClient.invalidateQueries({ queryKey: ['agents', 'marketplace'] });
         } catch (error) {
             setCreatorError(error instanceof Error ? error.message : "Impossible de créer l'agent.");
         } finally { setIsCreating(false); }
@@ -357,7 +381,7 @@ export default function MarketplacePage() {
                         <div className="marketplace-grid">
                             {displayedAgents.map((agent) => {
                                 return <article className="agent-card" key={agent.id} onClick={() => openDetails(agent)}>
-                                    <div className="agent-card__top"><div className="agent-card__icon"><AgentGlyph categoryId={agent.categoryId} /></div><div className="agent-card__badges">{view === 'mine' && <span className="agent-card__visibility">{agent.isPublic ? 'Public' : 'Privé'}</span>}{agent.isFavorite && <span className="agent-card__favorite"><IoStar size={13} /> Favori</span>}</div></div>
+                                    <div className="agent-card__top"><div className="agent-card__icon"><AgentGlyph categoryId={agent.categoryId} /></div><div className="agent-card__badges">{view === 'mine' && <span className="agent-card__visibility">{visibilityLabel(agent.visibility)}</span>}{agent.isFavorite && <span className="agent-card__favorite"><IoStar size={13} /> Favori</span>}</div></div>
                                     <div><h2>{agent.name}</h2></div>
                                     <div className="agent-card__example"><ChatExampleIcon /><span>{agent.examples[0]}</span></div>
                                 </article>;
@@ -383,12 +407,13 @@ export default function MarketplacePage() {
                         {documents.length > 0 && <div className="agent-creator__documents">{documents.map((document) => <div key={document.id}><IoDocumentTextOutline size={18} /><span>{document.name}<small>{Math.max(1, Math.round(document.size / 1024))} Ko</small></span><button onClick={() => setDocuments((current) => current.filter((item) => item.id !== document.id))}><IoClose size={14} /></button></div>)}</div>}
                     </section>
                     <section className="agent-creator__publish">
-                        <VisibilityChoice active={!form.isPublic} icon={<IoLockClosedOutline size={20} />} title="Privé" hint="Visible uniquement par vous" onClick={() => setForm({ ...form, isPublic: false })} />
-                        <VisibilityChoice active={form.isPublic} icon={<IoExtensionPuzzleOutline size={20} />} title="Marketplace" hint="Accessible à tous les utilisateurs" onClick={() => setForm({ ...form, isPublic: true })} />
+                        <VisibilityChoice active={form.visibility === 'private'} icon={<IoLockClosedOutline size={20} />} title="Privé" hint="Visible uniquement par vous" onClick={() => setForm({ ...form, visibility: 'private' })} />
+                        <VisibilityChoice active={form.visibility === 'friends'} icon={<IoPeopleOutline size={20} />} title="Amis uniquement" hint="Accessible uniquement à vous et à vos amis" onClick={() => setForm({ ...form, visibility: 'friends' })} />
                     </section>
                     {creatorError && <div className="agent-creator__message agent-creator__message--error">{creatorError}</div>}
+                    {pendingFavorite && <button type="button" className="agent-creator__upload" disabled={isCreating || retryingFavorite} onClick={() => void retryFavorite()}>{retryingFavorite ? 'Ajout en cours…' : `Réessayer l’ajout de « ${pendingFavorite.name} » aux favoris`}</button>}
                     {creatorSuccess && <div className="agent-creator__message agent-creator__message--success"><IoCheckmark /> {creatorSuccess}</div>}
-                    <button className="agent-creator__submit" onClick={() => void createAgent()} disabled={isCreating}>{isCreating ? 'Création…' : <><IoSparkles size={18} /> Créer mon agent</>}</button>
+                    <button className="agent-creator__submit" onClick={() => void createAgent()} disabled={isCreating || retryingFavorite}>{isCreating ? 'Création…' : <><IoSparkles size={18} /> Créer mon agent</>}</button>
                 </main>
             )}
 
@@ -409,6 +434,7 @@ export default function MarketplacePage() {
                             <div className="agent-detail__examples">{selectedAgent.examples.slice(0, 2).map((example) => <div key={example}><ChatExampleIcon /><span>{example}</span></div>)}</div>
                         </>
                     )}
+                    <small className="agent-detail__hint">Visibilité : {visibilityLabel(selectedAgent.visibility)}</small>
                     {catalogError && <div className="agent-detail__error">{catalogError}</div>}
                     {!isEditingAgent && <>
                         <div className="agent-detail__actions">
@@ -423,7 +449,7 @@ export default function MarketplacePage() {
                     </>}
                     {view === 'mine' && !isEditingAgent && !openingConversation && <div className="agent-detail__management">
                         <button onClick={() => setIsEditingAgent(true)}><IoCreateOutline size={17} /><span>Modifier</span></button>
-                        <button disabled={agentActionPending} onClick={() => void toggleVisibility()}>{selectedAgent.isPublic ? <IoLockClosedOutline size={17} /> : <IoGlobeOutline size={17} />}<span>{selectedAgent.isPublic ? 'Rendre privé' : 'Rendre public'}</span></button>
+                        <button disabled={agentActionPending} onClick={() => void toggleVisibility()}>{selectedAgent.visibility === 'private' ? <IoPeopleOutline size={17} /> : <IoLockClosedOutline size={17} />}<span>{selectedAgent.visibility === 'private' ? 'Partager avec mes amis' : 'Rendre privé'}</span></button>
                         {!confirmDelete ? (
                             <button className="is-danger" onClick={() => setConfirmDelete(true)}><IoTrashOutline size={17} /><span>Supprimer</span></button>
                         ) : (
@@ -434,6 +460,10 @@ export default function MarketplacePage() {
             </div>}
         </div>
     );
+}
+
+function visibilityLabel(visibility: ToolItem['visibility']) {
+    return visibility === 'friends' ? 'Amis uniquement' : visibility === 'public' ? 'Public' : 'Privé';
 }
 
 function CreatorIntro({ step, title }: { step: string; title: string }) {

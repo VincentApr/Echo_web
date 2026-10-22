@@ -13,6 +13,7 @@ export interface ToolItem {
     isFavorite: boolean;
     isMine: boolean;
     isPublic: boolean;
+    visibility: 'private' | 'friends' | 'public';
     systemPrompt: string;
 }
 
@@ -211,7 +212,8 @@ export function enrichAgent(agent: BackendAgent): ToolItem {
         examples: enrichment.examples.length ? enrichment.examples : buildContextualExamples(agent),
         isFavorite: Boolean(agent.is_favorite),
         isMine: Boolean(agent.is_mine),
-        isPublic: Boolean(agent.is_public || agent.visibility === 'public'),
+        isPublic: agent.visibility ? agent.visibility === 'public' : Boolean(agent.is_public),
+        visibility: agent.visibility ?? (agent.is_public ? 'public' : 'private'),
         systemPrompt: agent.system_prompt || agent.instructions?.system_prompt || '',
     };
 }
