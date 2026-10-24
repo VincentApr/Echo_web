@@ -1,5 +1,6 @@
 import type { ToolItem } from '../data/toolsCatalog';
 
+export type IdentityEditorSection = 'name' | 'description' | 'portrait' | IdentitySection;
 export type IdentitySection = 'instructions' | 'context' | 'tools';
 export interface IdentityDocument { name: string; content: string; }
 export interface IdentityTool { id?: number | string; uuid?: string; name: string; description?: string; }
@@ -23,8 +24,8 @@ export function identityContent(agent: ToolItem): IdentityContent {
     const index = agent.systemPrompt.indexOf(DOCUMENTATION_ENVELOPE);
     return {
         instructions: index < 0 ? agent.systemPrompt : agent.systemPrompt.slice(0, index),
-        context: index < 0 ? '' : agent.systemPrompt.slice(index + DOCUMENTATION_ENVELOPE.length),
-        documents: [],
+        context: agent.identityContext?.text ?? (index < 0 ? '' : agent.systemPrompt.slice(index + DOCUMENTATION_ENVELOPE.length)),
+        documents: agent.identityContext?.documents ?? [],
         tools: agent.tools ?? [],
     };
 }
@@ -54,4 +55,22 @@ export function sectionExcerpt(section: IdentitySection, content: IdentityConten
         return excerpt([content.context, ...content.documents.map(document => document.name)].filter(Boolean).join(' · ')) || identitySections.context.empty;
     }
     return excerpt(content.tools.map(tool => tool.name).join(' · ')) || identitySections.tools.empty;
+}
+
+export interface AgentDraft extends IdentityContent {
+    name: string;
+    description: string;
+    avatarPrompt: string;
+    visibility: 'private' | 'friends' | 'public';
+}
+export const emptyAgentDraft: AgentDraft = { name: '', description: '', avatarPrompt: '', visibility: 'private', instructions: '', context: '', documents: [], tools: [] };
+export function agentDraft(agent: ToolItem): AgentDraft {
+    return { ...identityContent(agent), name: agent.name, description: agent.description, avatarPrompt: agent.avatarPrompt ?? '', visibility: agent.visibility };
+}
+export function draftPayload(draft: AgentDraft) {
+    return {
+        name: draft.name.trim(), description: draft.description.trim(), avatar_prompt: draft.avatarPrompt,
+        system_prompt: composeAgentPrompt(draft.instructions, draft.context, draft.documents),
+        identity_context: { text: draft.context, documents: draft.documents },
+    };
 }

@@ -51,6 +51,9 @@ test('the card stays fixed while a matching-height side panel scrolls all detail
     await openCard(page);
     const card = page.locator('.identity-card--full');
     const before = await card.boundingBox();
+    const actions = page.getByRole('dialog').locator('.identity-actions');
+    expect(await actions.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+    await expect(page.getByRole('button', { name: 'Fermer la carte' })).not.toBeFocused();
     const instructionsButton = page.getByRole('dialog').getByRole('button', { name: /^Instructions/ });
     await instructionsButton.click();
     const panel = page.locator('.identity-dialog .identity-panel');
@@ -72,7 +75,7 @@ test('the card stays fixed while a matching-height side panel scrolls all detail
     await expect(panel).toContainText('Camille coordonne le projet.');
     await page.screenshot({ path: test.info().outputPath('badge-desktop.png'), animations: 'disabled' });
     await page.getByRole('dialog').getByRole('button', { name: /^Outils/ }).click();
-    await expect(panel).toContainText('Consulter les rendez-vous');
+    await expect(panel).toContainText('Calendrier');
     await page.keyboard.press('Escape');
     await expect(panel).toHaveCount(0);
     await expect(page.getByRole('dialog').getByRole('button', { name: /^Outils/ })).toBeFocused();
@@ -85,8 +88,11 @@ test('editing uses the fetched instructions and preserves existing reference doc
     const fixture = await setup(page);
     await openCard(page);
     await page.getByRole('button', { name: 'Modifier', exact: true }).click();
-    await expect(page.getByLabel('Instructions système')).toHaveValue(instructions + documentation);
-    await page.getByLabel('Nom', { exact: true }).fill('Atelier personnel');
+    await page.getByRole('button', { name: /^Instructions/ }).click();
+    await expect(page.getByLabel('Instructions système')).toHaveValue(instructions);
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: 'Modifier le nom' }).click();
+    await page.getByLabel('Nom de l’agent').fill('Atelier personnel');
     await page.getByRole('button', { name: 'Enregistrer', exact: true }).click();
     await expect(page.getByRole('dialog').getByRole('heading', { name: 'Atelier personnel' })).toBeVisible();
     expect(fixture.updates[0].system_prompt).toBe((instructions + documentation).trim());
@@ -108,7 +114,16 @@ test('small screens show the scrollable panel over the card without resizing it'
     await page.screenshot({ path: test.info().outputPath('badge-mobile-panel.png'), animations: 'disabled' });
     await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
     await expect(page.getByRole('dialog').getByRole('button', { name: /^Instructions/ })).toBeFocused();
+    const actions = page.getByRole('dialog').locator('.identity-actions');
+    await expect(actions).toHaveCSS('scrollbar-width', 'none');
+    await expect(actions).toHaveAttribute('data-fade-end', '');
+    await expect(actions).not.toHaveAttribute('data-fade-start');
+    await actions.evaluate(element => { element.scrollLeft = (element.scrollWidth - element.clientWidth) / 2; });
+    await expect(actions).toHaveAttribute('data-fade-start', '');
+    await expect(actions).toHaveAttribute('data-fade-end', '');
     await page.screenshot({ path: test.info().outputPath('badge-mobile.png'), animations: 'disabled' });
+    await actions.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+    await expect(actions).not.toHaveAttribute('data-fade-end');
 });
 
 test('failed details cannot overwrite instructions and can be retried', async ({ page }) => {
@@ -123,21 +138,75 @@ test('failed details cannot overwrite instructions and can be retried', async ({
     await expect(page.locator('.identity-panel')).toContainText('distingue les faits des hypothèses');
 });
 
-test('creator preview displays separate documents without expanding the card', async ({ page }) => {
+test('creation starts empty and each editable panel leaves the card dimensions unchanged', async ({ page }) => {
+    await page.setViewportSize({ width: 1600, height: 1000 });
     await setup(page);
     await page.getByRole('button', { name: 'Créer', exact: true }).click();
+    const editor = page.getByRole('region', { name: 'Créer une carte' });
+    const card = editor.locator('.identity-card--full');
+    const before = (await card.boundingBox())!;
+    await expect(editor.locator('.identity-panel')).toHaveCount(0);
+    await expect(page.getByText('Votre carte prend forme.', { exact: false })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('creation-empty.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: 'Modifier le nom' }).click();
+    await expect(page.getByLabel('Nom de l’agent')).toHaveValue('');
     await page.getByLabel('Nom de l’agent').fill('Mon studio');
-    await page.getByLabel('Description', { exact: true }).fill('Un partenaire pour écrire.');
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: 'Modifier la description' }).click();
+    await page.getByRole('textbox', { name: 'Description', exact: true }).fill('Un partenaire pour écrire.');
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: 'Modifier le portrait' }).click();
+    await page.getByLabel('Prompt du portrait').fill('Un personnage peint à l’aquarelle.');
+    await expect(editor.locator('input[type=file]')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: /^Instructions/ }).click();
     await page.getByLabel('Instructions système').fill('Réponds en français.');
-    await page.getByLabel('Documentation', { exact: true }).fill('Guide de style : phrases courtes.');
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: /^Contexte/ }).click();
+    await page.getByRole('textbox', { name: 'Documentation', exact: true }).fill('Guide de style : phrases courtes.');
     await page.locator('input[type=file]').setInputFiles({ name: 'notes.md', mimeType: 'text/markdown', buffer: Buffer.from('Contenu du document de référence.') });
-    const preview = page.getByRole('region', { name: 'Aperçu de la carte' });
-    await expect(preview.getByRole('heading', { name: 'Mon studio' })).toBeVisible();
-    const before = await preview.locator('.identity-card--full').boundingBox();
-    await preview.getByRole('button', { name: /^Contexte/ }).click();
-    await expect(preview.locator('.identity-panel')).toContainText('notes.md');
-    await expect(preview.locator('.identity-panel')).toContainText('Contenu du document de référence.');
-    expect((await preview.locator('.identity-card--full').boundingBox())!.height).toBe(before!.height);
+    await expect(editor.getByRole('heading', { name: 'Mon studio' })).toBeVisible();
+    await expect(editor.locator('.identity-panel')).toContainText('notes.md');
+    await expect(editor.locator('.identity-panel')).toBeVisible();
+    await expect.poll(async () => (await editor.boundingBox())!.width).toBe(1252);
+    const after = (await card.boundingBox())!;
+    expect(after.height).toBe(before.height);
+    expect(after.width).toBe(before.width);
+    expect(after.x).toBeLessThan(before.x);
+    const panel = (await editor.locator('.identity-panel').boundingBox())!;
+    expect(panel.height).toBe(after.height);
+    expect(panel.x).toBeGreaterThan(after.x + after.width);
+    await page.screenshot({ path: test.info().outputPath('creation-context.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: 'Fermer la rubrique' }).click();
+    await page.getByRole('button', { name: 'Modifier le portrait' }).click();
+    await expect(page.getByLabel('Prompt du portrait')).toHaveValue('Un personnage peint à l’aquarelle.');
+});
+
+test('leaving edit mode discards changes and restores the original card in the same dialog', async ({ page }) => {
+    const fixture = await setup(page);
+    await openCard(page);
+    await expect(page.getByText('Identité de l’agent', { exact: true })).toHaveCount(0);
+    await page.getByRole('button', { name: /^Contexte/ }).click();
+    await page.getByRole('button', { name: 'Modifier', exact: true }).click();
+    await page.locator('.identity-card-perspective').evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)); });
+    await expect(page.locator('.identity-panel')).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath('editing-actions.png'), animations: 'disabled' });
+    await page.getByRole('button', { name: 'Modifier le nom' }).click();
+    await page.getByLabel('Nom de l’agent').fill('Brouillon');
+    await expect(page.getByLabel('Nom de l’agent')).toHaveCSS('outline-style', 'none');
+    await expect(page.locator('.identity-panel__scroll label')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Quitter la modification' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.getByRole('dialog').getByRole('heading', { name: 'Atelier', exact: true })).toBeVisible();
+    await expect(page.locator('.identity-panel')).toHaveCount(0);
+    expect(fixture.updates).toHaveLength(0);
+    await page.getByRole('button', { name: 'Modifier', exact: true }).click();
+    await page.getByRole('button', { name: 'Modifier le nom' }).click();
+    await expect(page.getByLabel('Nom de l’agent')).toHaveValue('Atelier');
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Modifier le nom' })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: 'Modifier', exact: true })).toBeVisible();
 });
 
 test('drag tilts the card and releasing returns it to flat', async ({ page }) => {

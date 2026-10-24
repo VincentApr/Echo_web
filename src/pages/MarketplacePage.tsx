@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-    IoCheckmark, IoClose, IoCloudUploadOutline, IoDocumentTextOutline,
-    IoLockClosedOutline, IoSearch, IoSparkles, IoStar, IoStarOutline,
-    IoChatbubblesOutline, IoPeopleOutline,
+    IoCheckmark, IoClose,
+    IoSearch, IoSparkles, IoStar, IoStarOutline,
+    IoChatbubblesOutline,
     IoCreateOutline, IoTrashOutline, IoCompassOutline, IoPersonOutline, IoAddOutline,
 } from 'react-icons/io5';
 import { fetchWithAuth } from '@web/services/apiClient';
@@ -15,17 +15,13 @@ import { webDatabaseManager } from '../services/webDatabase';
 import { TOOL_CATEGORIES, enrichAgent, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
 import { ensureAgentFavorite } from '../services/agentFavorites';
 import AgentIdentityCard from '../components/agents/AgentIdentityCard';
-import AgentIdentityDialog, { IdentityPanel } from '../components/agents/AgentIdentityDialog';
-import { composeAgentPrompt, type IdentityContent, type IdentitySection } from '../utils/agentIdentity';
-import { useMediaQuery } from '../hooks/useMediaQuery';
+import AgentActionRow from '../components/agents/AgentActionRow';
+import AgentIdentityDialog from '../components/agents/AgentIdentityDialog';
+import { agentDraft, draftPayload, emptyAgentDraft, type AgentDraft } from '../utils/agentIdentity';
+import AgentIdentityEditor from '../components/agents/AgentIdentityEditor';
 import './MarketplacePage.css';
 
 type MarketplaceView = 'catalog' | 'mine' | 'create';
-interface AgentDocument { id: string; name: string; content: string; size: number; }
-interface CreatorForm { name: string; description: string; systemPrompt: string; documentation: string; visibility: 'private' | 'friends'; }
-
-const EMPTY_FORM: CreatorForm = { name: '', description: '', systemPrompt: '', documentation: '', visibility: 'private' };
-
 function normalizeAgentList(payload: unknown): BackendAgent[] {
     if (Array.isArray(payload)) return payload as BackendAgent[];
     if (!payload || typeof payload !== 'object') return [];
@@ -44,7 +40,10 @@ function normalizeAgentList(payload: unknown): BackendAgent[] {
 async function readError(response: Response, fallback: string): Promise<string> {
     try {
         const data = await response.json();
-        return data.error || data.detail || fallback;
+        const messages = (value: unknown): string[] => typeof value === 'string' ? [value]
+            : Array.isArray(value) ? value.flatMap(messages)
+            : value && typeof value === 'object' ? Object.values(value).flatMap(messages) : [];
+        return messages(data.error || data.detail || data).join(' ') || fallback;
     } catch { return fallback; }
 }
 
@@ -64,15 +63,13 @@ export default function MarketplacePage() {
     const [agentActionPending, setAgentActionPending] = useState(false);
     const [isEditingAgent, setIsEditingAgent] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
-    const [editForm, setEditForm] = useState({ name: '', description: '', systemPrompt: '' });
-    const [form, setForm] = useState<CreatorForm>(EMPTY_FORM);
-    const [documents, setDocuments] = useState<AgentDocument[]>([]);
+    const [editForm, setEditForm] = useState<AgentDraft>(emptyAgentDraft);
+    const [form, setForm] = useState<AgentDraft>(emptyAgentDraft);
     const [isCreating, setIsCreating] = useState(false);
     const [creatorError, setCreatorError] = useState<string | null>(null);
     const [creatorSuccess, setCreatorSuccess] = useState<string | null>(null);
     const [pendingFavorite, setPendingFavorite] = useState<{ uuid: string; name: string } | null>(null);
     const [retryingFavorite, setRetryingFavorite] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
 
     const { data: agents = [], isLoading } = useQuery({
         queryKey: ['agents', 'marketplace'],
@@ -188,7 +185,7 @@ export default function MarketplacePage() {
 
     const openDetails = (agent: ToolItem) => {
         setSelectedAgent(agent);
-        setEditForm({ name: agent.name, description: agent.description, systemPrompt: agent.systemPrompt });
+        setEditForm(agentDraft(agent));
         setIsEditingAgent(false);
         setConfirmDelete(false);
         setCatalogError(null);
@@ -236,7 +233,7 @@ export default function MarketplacePage() {
             });
             setSelectedAgent(enriched);
             queryClient.setQueryData(['agents', 'identity', enriched.agentUuid], updated);
-            setEditForm({ name: enriched.name, description: enriched.description, systemPrompt: enriched.systemPrompt });
+            setEditForm(agentDraft(enriched));
             queryClient.setQueryData<ToolItem[]>(['agents', 'mine', 'marketplace'], (current = []) => (
                 current.map((item) => item.id === enriched.id ? enriched : item)
             ));
@@ -251,18 +248,11 @@ export default function MarketplacePage() {
     const saveOwnedAgent = async () => {
         if (!editForm.name.trim()) { setCatalogError("Le nom de l'agent est obligatoire."); return; }
         const updated = await updateOwnedAgent({
-            name: editForm.name.trim(),
-            description: editForm.description.trim(),
-            system_prompt: editForm.systemPrompt.trim(),
+            ...draftPayload(editForm),
+            visibility: editForm.visibility,
+            ...(activeAgent?.agentType === 'ToolAgent' ? { tool_uuids: editForm.tools.map(tool => tool.uuid) } : {}),
         });
         if (updated) setIsEditingAgent(false);
-    };
-
-    const toggleVisibility = async () => {
-        if (!selectedAgent) return;
-        await updateOwnedAgent({
-            visibility: selectedAgent.visibility === 'private' ? 'friends' : 'private',
-        });
     };
 
     const deleteOwnedAgent = async () => {
@@ -281,26 +271,6 @@ export default function MarketplacePage() {
         } finally { setAgentActionPending(false); }
     };
 
-    const handleFiles = async (files: FileList | null) => {
-        if (!files?.length) return;
-        setCreatorError(null);
-        const next: AgentDocument[] = [];
-        for (const file of Array.from(files)) {
-            if (file.size > 1_500_000) {
-                setCreatorError(`« ${file.name} » est trop volumineux (1,5 Mo maximum).`);
-                continue;
-            }
-            try {
-                next.push({ id: `${file.name}-${file.lastModified}-${file.size}`, name: file.name, content: await file.text(), size: file.size });
-            } catch { setCreatorError(`Impossible de lire « ${file.name} » comme document texte.`); }
-        }
-        setDocuments((current) => {
-            const existing = new Set(current.map((document) => document.id));
-            return [...current, ...next.filter((document) => !existing.has(document.id))];
-        });
-        if (fileInputRef.current) fileInputRef.current.value = '';
-    };
-
     const retryFavorite = async () => {
         if (!pendingFavorite || retryingFavorite || isCreating) return;
         setRetryingFavorite(true); setCreatorError(null);
@@ -316,29 +286,24 @@ export default function MarketplacePage() {
 
     const createAgent = async () => {
         if (!form.name.trim()) { setCreatorError("Donnez un nom à l'agent."); return; }
-        if (!form.systemPrompt.trim() && !form.documentation.trim() && documents.length === 0) {
+        if (!form.instructions.trim() && !form.context.trim() && form.documents.length === 0) {
             setCreatorError('Ajoutez au moins des instructions ou une documentation.'); return;
         }
-        const systemPrompt = composeAgentPrompt(
-            form.systemPrompt.trim() || `Tu es ${form.name.trim()}, un agent spécialisé.`,
-            form.documentation,
-            documents,
-        );
-
         setPendingFavorite(null);
         setIsCreating(true); setCreatorError(null); setCreatorSuccess(null);
         try {
-            const response = await fetchWithAuth(`${API_BASE_URL}/framework/agents/mistral/`, {
+            const response = await fetchWithAuth(`${API_BASE_URL}/framework/agents/tools/`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    name: form.name.trim(), description: form.description.trim(), system_prompt: systemPrompt,
+                    ...draftPayload(form),
+                    tool_uuids: form.tools.map(tool => tool.uuid),
                     visibility: form.visibility,
                 }),
             });
             if (!response.ok) throw new Error(await readError(response, "Impossible de créer l'agent."));
             const created = await response.json() as BackendAgent;
             const createdName = form.name.trim();
-            setForm(EMPTY_FORM); setDocuments([]);
+            setForm(emptyAgentDraft);
             setPendingFavorite({ uuid: created.uuid, name: createdName });
             try {
                 await ensureAgentFavorite(created.uuid);
@@ -400,64 +365,44 @@ export default function MarketplacePage() {
                     )}
                 </main>
             ) : (
-                <main className="agent-creator">
-                    <AgentIdentityPreview form={form} documents={documents} />
-                    <CreatorIntro step="1" title="Rôle" />
-                    <section className="agent-creator__form">
-                        <div className="agent-creator__row">
-                            <label>Nom de l’agent<input value={form.name} maxLength={80} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Ex. Assistant juridique" /></label>
-                            <label>Description<input value={form.description} maxLength={240} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="Ce que cet agent sait faire" /></label>
-                        </div>
-                        <label>Instructions système<textarea value={form.systemPrompt} onChange={(event) => setForm({ ...form, systemPrompt: event.target.value })} placeholder="Tu es un avocat spécialisé en droit du travail français. Tu réponds de manière claire, tu cites tes sources et tu précises lorsqu’une information manque…" rows={7} /></label>
-                    </section>
-                    <CreatorIntro step="2" title="Connaissances" />
-                    <section className="agent-creator__form">
-                        <label>Documentation<textarea value={form.documentation} onChange={(event) => setForm({ ...form, documentation: event.target.value })} placeholder="Collez ici un extrait de code, une procédure interne, un guide produit…" rows={8} /></label>
-                        <input ref={fileInputRef} className="agent-creator__file-input" type="file" multiple accept=".txt,.md,.csv,.json,.xml,.html" onChange={(event) => void handleFiles(event.target.files)} />
-                        <button className="agent-creator__upload" type="button" onClick={() => fileInputRef.current?.click()}><IoCloudUploadOutline size={21} /><span><strong>Importer des documents</strong><small>TXT, Markdown, CSV, JSON, XML ou HTML · 1,5 Mo maximum</small></span></button>
-                        {documents.length > 0 && <div className="agent-creator__documents">{documents.map((document) => <div key={document.id}><IoDocumentTextOutline size={18} /><span>{document.name}<small>{Math.max(1, Math.round(document.size / 1024))} Ko</small></span><button onClick={() => setDocuments((current) => current.filter((item) => item.id !== document.id))}><IoClose size={14} /></button></div>)}</div>}
-                    </section>
-                    <section className="agent-creator__publish">
-                        <VisibilityChoice active={form.visibility === 'private'} icon={<IoLockClosedOutline size={20} />} title="Privé" hint="Visible uniquement par vous" onClick={() => setForm({ ...form, visibility: 'private' })} />
-                        <VisibilityChoice active={form.visibility === 'friends'} icon={<IoPeopleOutline size={20} />} title="Amis uniquement" hint="Accessible uniquement à vous et à vos amis" onClick={() => setForm({ ...form, visibility: 'friends' })} />
-                    </section>
-                    {creatorError && <div className="agent-creator__message agent-creator__message--error">{creatorError}</div>}
-                    {pendingFavorite && <button type="button" className="agent-creator__upload" disabled={isCreating || retryingFavorite} onClick={() => void retryFavorite()}>{retryingFavorite ? 'Ajout en cours…' : `Réessayer l’ajout de « ${pendingFavorite.name} » aux favoris`}</button>}
-                    {creatorSuccess && <div className="agent-creator__message agent-creator__message--success"><IoCheckmark /> {creatorSuccess}</div>}
-                    <button className="agent-creator__submit" onClick={() => void createAgent()} disabled={isCreating || retryingFavorite}>{isCreating ? 'Création…' : <><IoSparkles size={18} /> Créer mon agent</>}</button>
+                <main className="identity-creator-page">
+                    <AgentIdentityEditor draft={form} onChange={setForm} busy={isCreating || retryingFavorite} status={<>
+                        {creatorError && <p className="identity-dialog__error" role="alert">{creatorError}</p>}
+                        {creatorSuccess && <p className="identity-dialog__status" role="status"><IoCheckmark /> {creatorSuccess}</p>}
+                    </>} actions={<>
+                            {pendingFavorite && <button type="button" className="identity-white-button" onClick={() => void retryFavorite()}>{retryingFavorite ? 'Ajout en cours…' : `Réessayer l’ajout de « ${pendingFavorite.name} » aux favoris`}</button>}
+                            <button type="button" className="identity-white-button" onClick={() => void createAgent()}>{isCreating ? 'Création…' : 'Créer mon agent'}</button>
+                    </>} />
                 </main>
             )}
 
             {activeAgent && <AgentIdentityDialog key={activeAgent.agentUuid} agent={activeAgent}
                 loading={agentDetails.isPending} error={agentDetails.isError ? agentDetails.error.message : null}
-                onRetry={() => void agentDetails.refetch()} onClose={closeDetails} onStopEditing={() => setIsEditingAgent(false)}
-                editing={isEditingAgent ? <form className="identity-edit" onSubmit={event => { event.preventDefault(); void saveOwnedAgent(); }}>
-                    <label>Nom<input autoFocus value={editForm.name} maxLength={100} onChange={event => setEditForm({ ...editForm, name: event.target.value })} /></label>
-                    <label>Description<input value={editForm.description} maxLength={500} onChange={event => setEditForm({ ...editForm, description: event.target.value })} /></label>
-                    <label>Instructions système<textarea value={editForm.systemPrompt} onChange={event => setEditForm({ ...editForm, systemPrompt: event.target.value })} rows={8} /></label>
-                    <div className="identity-edit__actions"><button type="button" className="identity-white-button" disabled={agentActionPending} onClick={() => setIsEditingAgent(false)}>Annuler</button><button className="identity-white-button" disabled={agentActionPending}>Enregistrer</button></div>
-                </form> : undefined}
-                actions={<>
+                onRetry={() => void agentDetails.refetch()} onClose={closeDetails} onStopEditing={() => { if (!agentActionPending) { setIsEditingAgent(false); setCatalogError(null); } }}
+                editing={isEditingAgent ? <AgentIdentityEditor draft={editForm} onChange={setEditForm} agent={activeAgent} busy={agentActionPending} status={catalogError && <p className="identity-dialog__error" role="alert">{catalogError}</p>} actions={<>
+                    <button type="button" className="identity-white-button" onClick={() => { setIsEditingAgent(false); setCatalogError(null); }}>Quitter la modification</button><button type="button" className="identity-white-button" onClick={() => void saveOwnedAgent()}>{agentActionPending ? 'Enregistrement…' : 'Enregistrer'}</button>
+                </>} /> : undefined}
+                actions={resetPanel => <>
                     {catalogError && <p className="identity-dialog__error" role="alert">{catalogError}</p>}
                     <p className="identity-dialog__hint">Visibilité : {visibilityLabel(activeAgent.visibility)}</p>
                     {!isEditingAgent && <>
-                        <div className="identity-actions">
+                        <AgentActionRow>
                             <button className="identity-white-button" aria-pressed={activeAgent.isFavorite} disabled={favoritePending === activeAgent.agentUuid} onClick={() => void toggleFavorite(activeAgent)}>
                                 {activeAgent.isFavorite ? <IoStar size={17} /> : <IoStarOutline size={17} />}{favoritePending === activeAgent.agentUuid ? 'Mise à jour…' : activeAgent.isFavorite ? 'Retirer de mes favoris' : 'Ajouter à mes favoris'}
                             </button>
                             <button className="identity-white-button" disabled={openingConversation || agentActionPending} onClick={() => void startConversation(activeAgent)}>
                                 <IoChatbubblesOutline size={17} />{openingConversation ? 'Ouverture…' : 'Commencer une conversation'}
                             </button>
-                        </div>
-                        {activeAgent.isMine && !openingConversation && <div className="identity-actions">
+                        {activeAgent.isMine && !openingConversation && <>
                             <button className="identity-white-button" disabled={agentDetails.isPending || agentDetails.isError || agentActionPending} onClick={() => {
-                                setEditForm({ name: activeAgent.name, description: activeAgent.description, systemPrompt: activeAgent.systemPrompt });
+                                resetPanel();
+                                setEditForm(agentDraft(activeAgent));
                                 setIsEditingAgent(true);
                             }}><IoCreateOutline size={17} />Modifier</button>
-                            <button className="identity-white-button" disabled={agentActionPending} onClick={() => void toggleVisibility()}>{activeAgent.visibility === 'private' ? <IoPeopleOutline size={17} /> : <IoLockClosedOutline size={17} />}{activeAgent.visibility === 'private' ? 'Partager avec mes amis' : 'Rendre privé'}</button>
                             {!confirmDelete ? <button className="identity-white-button identity-white-button--danger" disabled={agentActionPending} onClick={() => setConfirmDelete(true)}><IoTrashOutline size={17} />Supprimer</button>
                                 : <div className="identity-delete-confirm"><span>Supprimer cet agent ?</span><button className="identity-white-button" disabled={agentActionPending} onClick={() => setConfirmDelete(false)}>Non</button><button className="identity-white-button identity-white-button--danger" disabled={agentActionPending} onClick={() => void deleteOwnedAgent()}>Oui</button></div>}
-                        </div>}
+                        </>}
+                        </AgentActionRow>
                         <p className="identity-dialog__hint">Les favoris apparaissent dans + → Agents au sein de vos conversations.</p>
                     </>}
                 </>} />}
@@ -468,28 +413,4 @@ export default function MarketplacePage() {
 
 function visibilityLabel(visibility: ToolItem['visibility']) {
     return visibility === 'friends' ? 'Amis uniquement' : visibility === 'public' ? 'Public' : 'Privé';
-}
-
-function CreatorIntro({ step, title }: { step: string; title: string }) {
-    return <section className="agent-creator__intro"><span className="agent-creator__step">{step}</span><h2>{title}</h2></section>;
-}
-
-function VisibilityChoice({ active, icon, title, hint, onClick }: { active: boolean; icon: React.ReactNode; title: string; hint: string; onClick: () => void }) {
-    return <button className={`agent-creator__visibility ${active ? 'is-active' : ''}`} onClick={onClick}>{icon}<span><strong>{title}</strong><small>{hint}</small></span>{active && <IoCheckmark />}</button>;
-}
-
-function AgentIdentityPreview({ form, documents }: { form: CreatorForm; documents: AgentDocument[] }) {
-    const [section, setSection] = useState<IdentitySection | null>(null);
-    const trigger = useRef<HTMLButtonElement | null>(null);
-    const overlay = useMediaQuery('(max-width: 1250px)');
-    const close = () => { setSection(null); requestAnimationFrame(() => trigger.current?.focus()); };
-    const agent = enrichAgent({ uuid: 'draft', name: form.name.trim() || 'Votre agent', description: form.description.trim() || 'Son rôle, en quelques mots.', system_prompt: form.systemPrompt });
-    const content: IdentityContent = { instructions: form.systemPrompt, context: form.documentation, documents, tools: [] };
-    return <section className="agent-creator__identity-preview" aria-label="Aperçu de la carte">
-        <p>Votre carte prend forme. Cliquez sur une rubrique pour consulter son contenu.</p>
-        <div className="identity-preview__row" onKeyDown={event => { if (event.key === 'Escape' && section) { event.stopPropagation(); close(); } }}>
-            <AgentIdentityCard agent={agent} content={content} inert={overlay && Boolean(section)} activeSection={section} onSection={(next, button) => { trigger.current = button; setSection(next); }} />
-            {section && <IdentityPanel section={section} content={content} onClose={close} />}
-        </div>
-    </section>;
 }

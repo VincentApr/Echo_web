@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type PointerEvent } from 'react';
 import { IoStar } from 'react-icons/io5';
 import type { ToolItem } from '../../data/toolsCatalog';
-import { identityContent, identityHue, identitySections, sectionExcerpt, type IdentityContent, type IdentitySection } from '../../utils/agentIdentity';
+import { identityContent, identityHue, identitySections, sectionExcerpt, type IdentityContent, type IdentityEditorSection, type IdentitySection } from '../../utils/agentIdentity';
 import './AgentIdentityCard.css';
 
 interface Props {
@@ -12,7 +12,8 @@ interface Props {
     loading?: boolean;
     unavailable?: boolean;
     inert?: boolean;
-    activeSection?: IdentitySection | null;
+    activeSection?: IdentityEditorSection | null;
+    onEdit?: (section: IdentityEditorSection, trigger: HTMLButtonElement) => void;
     onSection?: (section: IdentitySection, trigger: HTMLButtonElement) => void;
     onOpen?: () => void;
 }
@@ -27,7 +28,7 @@ function Portrait({ agent }: { agent: ToolItem }) {
     </span>;
 }
 
-export default function AgentIdentityCard({ agent, compact = false, visibilityLabel, content = identityContent(agent), loading, unavailable, inert, activeSection, onSection, onOpen }: Props) {
+export default function AgentIdentityCard({ agent, compact = false, visibilityLabel, content = identityContent(agent), loading, unavailable, inert, activeSection, onSection, onOpen, onEdit }: Props) {
     const surface = useRef<HTMLDivElement>(null);
     const drag = useRef<{ id: number; x: number; y: number } | null>(null);
     const style = { '--identity-hue': identityHue(agent.agentUuid) } as CSSProperties;
@@ -54,7 +55,15 @@ export default function AgentIdentityCard({ agent, compact = false, visibilityLa
         surface.current.style.removeProperty('--identity-shine');
     };
 
-    const identity = <>
+    const identity = onEdit ? <>
+        <button type="button" className="identity-card__edit identity-card__edit-portrait" aria-label="Modifier le portrait" aria-expanded={activeSection === 'portrait'} onClick={event => onEdit('portrait', event.currentTarget)}>
+            <Portrait agent={agent} />
+        </button>
+        <div className="identity-card__name">
+            <button type="button" className="identity-card__edit identity-card__edit-name" aria-label="Modifier le nom" aria-expanded={activeSection === 'name'} onClick={event => onEdit('name', event.currentTarget)}><h2>{agent.name || 'Nom'}</h2></button>
+            <button type="button" className="identity-card__edit identity-card__edit-description" aria-label="Modifier la description" aria-expanded={activeSection === 'description'} onClick={event => onEdit('description', event.currentTarget)}><p>{agent.description || 'Description'}</p></button>
+        </div>
+    </> : <>
         <Portrait agent={agent} />
         <div className="identity-card__name"><h2 title={agent.name}>{agent.name}</h2><p>{agent.description}</p></div>
     </>;
@@ -82,7 +91,7 @@ export default function AgentIdentityCard({ agent, compact = false, visibilityLa
                         return <button type="button" key={section} className="identity-card__section" aria-expanded={activeSection === section}
                             disabled={loading || unavailable} onClick={event => onSection?.(section, event.currentTarget)}>
                             <span className="identity-card__section-title"><strong>{identitySections[section].title}</strong></span>
-                            <span className="identity-card__excerpt">{loading ? 'Chargement…' : unavailable ? 'Informations indisponibles pour le moment.' : sectionExcerpt(section, content)}</span>
+                            <span className="identity-card__excerpt">{loading ? 'Chargement…' : unavailable ? 'Informations indisponibles pour le moment.' : (onEdit && !content[section === 'instructions' ? 'instructions' : section === 'context' ? 'context' : 'tools'].length && !(section === 'context' && content.documents.length)) ? 'Ajouter' : sectionExcerpt(section, content)}</span>
                         </button>;
                     })}
                 </div>

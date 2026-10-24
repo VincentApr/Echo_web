@@ -1,10 +1,12 @@
 // Catalogue d'outils — enrichissement local des agents backend
-import type { IdentityTool } from '../utils/agentIdentity';
+import type { IdentityDocument, IdentityTool } from '../utils/agentIdentity';
 
 export interface ToolItem {
     id: string;          // = agent uuid
     agentUuid: string;
     avatarUrl?: string;
+    avatarPrompt?: string;
+    identityContext?: { text: string; documents: IdentityDocument[] };
     name: string;
     description: string;
     longDescription: string;
@@ -193,6 +195,8 @@ export interface BackendAgent {
     is_public?: boolean;
     avatar_url?: string;
     avatar?: string | null;
+    avatar_prompt?: string;
+    identity_context?: { text: string; documents: IdentityDocument[] } | null;
     tools?: Array<Omit<IdentityTool, 'name'> & { name?: string; display_name?: string }>;
     is_favorite?: boolean;
     is_mine?: boolean;
@@ -209,8 +213,10 @@ export function enrichAgent(agent: BackendAgent): ToolItem {
         id: agent.uuid,
         agentUuid: agent.uuid,
         avatarUrl: agent.avatar_url || agent.avatar || undefined,
+        avatarPrompt: agent.avatar_prompt,
+        identityContext: agent.identity_context ?? undefined,
         name: agent.name,
-        description: agent.description || 'Agent IA disponible sur Echo.',
+        description: agent.description ?? '',
         longDescription: enrichment.longDescription || agent.description || 'Cet agent peut vous aider à automatiser vos tâches et répondre à vos questions.',
         icon: enrichment.icon,
         categoryId: enrichment.categoryId,

@@ -1,6 +1,6 @@
 # Echo Web
 
-Application web Echo, hébergée sur <https://web.echosocial.fr> (le site vitrine
+Application web Echo, hébergée sur <https://app.echosocial.fr> (le site vitrine
 `EchoInternet` occupe `echosocial.fr` et y renvoie depuis son bouton
 « Messagerie Web »).
 
@@ -13,8 +13,8 @@ aucun fichier de `src/` ni aucune configuration n'y fait référence, et le scri
 lancé automatiquement en `prebuild` — fait échouer la compilation si une
 référence à `mobile_src` ou `@mobile` réapparaît.
 
-Conséquence : la compilation réussit avec `mobile_src` vide. C'est exactement ce
-qui se passe en production, Railway ne récupérant pas les sous-modules.
+Conséquence : la compilation réussit avec `mobile_src` vide, sans récupération
+du sous-module en production.
 
 Pour disposer de la référence en local :
 
@@ -34,7 +34,7 @@ Le backend public est `https://api.echosocial.fr` (WebSockets :
 `vite.config.ts`). En production, `src/config/api.ts` bascule sur l'URL absolue
 du backend : aucun relais n'est nécessaire.
 
-## Déploiement (Railway)
+## Déploiement
 
 ```sh
 npm ci
@@ -42,10 +42,10 @@ npm run build   # produit dist/
 npm start       # sert dist/ via server.js
 ```
 
-Configuration : [`railway.toml`](railway.toml), [`nixpacks.toml`](nixpacks.toml)
-et [`server.js`](server.js) (Express, port `PORT`, repli SPA sur `index.html`).
+Serveur : [`server.js`](server.js) (Express, port `PORT`, repli SPA sur `index.html`).
+Les fichiers `railway.toml` et `nixpacks.toml` proviennent de l’ancien hébergement.
 
-Le domaine `web.echosocial.fr` doit figurer dans `CORS_ALLOWED_ORIGINS` et
+Le domaine `app.echosocial.fr` doit figurer dans `CORS_ALLOWED_ORIGINS` et
 `CSRF_TRUSTED_ORIGINS` du backend, sinon tous les appels API sont rejetés.
 
 L'accueil intelligent nécessite aussi le déploiement du backend `watches`, ses

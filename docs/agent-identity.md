@@ -1,45 +1,73 @@
-# Carte d’identité des agents — première passe visuelle
+# Carte d’identité et éditeur d’agents
 
 Le catalogue et « Mes agents » utilisent `AgentIdentityCard` en variante compacte.
-La fiche complète utilise le même composant : la carte garde ses dimensions,
-et les rubriques s’ouvrent dans un panneau distinct, de même hauteur, dont seul
-le contenu défile. Sur écran étroit, le panneau recouvre la carte ; les commandes
-masquées deviennent inertes. Échap ferme d’abord la rubrique puis la fiche.
+La fiche complète garde ses dimensions : les rubriques s’ouvrent à côté dans un
+panneau de même hauteur, dont seul le contenu défile. Sur écran étroit, le panneau
+recouvre la carte et les commandes masquées deviennent inertes. Échap ferme
+la rubrique, puis quitte la modification ou ferme la fiche.
 
-Les actions existantes restent sous la carte. La modification ouvre elle aussi
-un panneau extérieur et utilise le prompt complet chargé depuis l’API détail.
-Le formulaire de création dispose d’un aperçu vivant, sans changer son contrat
-de création actuel. Le glissement incline légèrement la carte et déplace un
-reflet ; relâcher ou annuler le geste la remet à plat. La préférence de réduction
-des animations désactive cet effet.
+`AgentIdentityEditor` est partagé par la création et la modification. À la création,
+la carte est vide et centrée. Le nom, la description, le portrait et les trois
+rubriques ouvrent chacun leur panneau. Les saisies actualisent la carte sans
+l’agrandir. Dans une fiche existante, « Modifier » présente le même éditeur ;
+« Quitter la modification » abandonne le brouillon et retrouve la fiche de lecture.
+Les données ne sont écrites que par « Créer mon agent » ou « Enregistrer ».
+Les actions restent sur une ligne : la carte de lecture mesure 782 × 460 px sur
+ordinateur ; sur mobile, les actions défilent sans barre, avec un fondu uniquement
+aux bords où il reste du contenu. Le passage lecture/édition est animé et respecte
+la réduction des animations. Les panneaux de saisie ne répètent pas leur titre.
 
-## Données utilisées actuellement
+Le portrait ne propose qu’un prompt. Aucun appel de génération d’image ou de résumé
+n’est effectué. Les extraits de rubrique sont toujours calculés localement. Les
+boutons d’action gardent le style blanc des headers. Le glissement et le reflet
+restent disponibles et respectent la réduction des animations.
 
-- Avatar : `avatar_url` ou `avatar`, puis initiale si absent ou inaccessible.
+## Données et compatibilité
+
+- Avatar : `avatar_url` ou `avatar`, puis initiale. Le prompt est `avatar_prompt`.
 - Couleur : palette déterministe à partir de l’UUID, stable après renommage.
-- Texte global : description existante ; rubriques : extraits, **pas des résumés IA**.
-- Instructions et outils : API `GET /framework/agents/{uuid}/`. Les outils
-  utilisent le `display_name` du serializer Django.
-- Contexte ancien : seule l’enveloppe exacte écrite par le formulaire web est
-  reconnue. Son contenu reste intégralement lisible. Aucun document n’est inventé
-  à partir d’un prompt libre. L’éditeur conserve le prompt original complet.
-- Dans l’aperçu, les fichiers sont distincts parce que le formulaire connaît
-  encore leurs noms et leurs contenus. Le backend continue de recevoir le format
-  historique jusqu’à la migration du contexte.
+- Contexte : `identity_context: { text, documents: [{ name, content }] }`.
+- Le `system_prompt` envoyé contient aussi les instructions et les références,
+  afin que le moteur utilise réellement les documents. Ils sont des textes joints
+  au prompt, sans stockage documentaire, extraction PDF ou indexation RAG.
+- Les anciens agents sans contexte structuré conservent leur prompt. Seule
+  l’enveloppe exacte du précédent créateur web sépare instructions et contexte ;
+  la documentation ancienne reste du texte intégral dans le panneau Contexte.
+- Une modification du prompt par un ancien client efface le contexte structuré
+  devenu potentiellement obsolète, afin de ne pas masquer sa modification.
+- Les nouveaux agents utilisent `POST /framework/agents/tools/` (ToolAgent).
+  `tool_uuids` choisit les outils ; `GET /tools/` fournit le catalogue public.
+  Le backend refuse les outils inactifs ou privés appartenant à un autre utilisateur.
+- Les ToolAgent existants permettent la sélection d’outils. Les anciens MistralAgent
+  gardent leur moteur : leurs instructions et leur contexte sont éditables mais
+  leur outillage n’est pas convertible depuis cette interface. Les agents externes
+  gardent la configuration d’instructions et de contexte de leur service.
+- Visibilité : privé par défaut, amis ou public, via le même sélecteur en création
+  et en modification. Seul le propriétaire peut enregistrer un changement. La création conserve l’ajout aux favoris et sa reprise sur erreur.
 
-## Suite après validation visuelle
+## Publication
 
-Structurer le contexte et les documents côté backend, enregistrer les quatre
-résumés générés et la couleur, générer le portrait à la création avec reprise
-sur erreur, puis décliner le badge dans l’application mobile. La construction
-guidée de la carte pourra ensuite remplacer le formulaire actuel.
+Web app : `https://app.echosocial.fr`. API : `https://api.echosocial.fr`.
+
+Les badges de lecture sont publiés dans Echo_web au commit `0da697f`.
+L’éditeur ajoute une dépendance backend : déployer les modifications de
+`reseau_social` et exécuter `python manage.py migrate` (migration
+`agent.0017_agent_identity`) avant de déployer ce nouveau frontend. Aucun appel
+IA ni nouvelle clé de fournisseur n’est nécessaire pour cette étape.
 
 ## Vérification
 
-`npm run build` et ESLint sur les fichiers concernés.
+- `npm run build` et ESLint sur les fichiers concernés.
+- `npx playwright test tests/e2e/agent-identity.spec.ts tests/e2e/agent-creation.spec.ts` :
+  géométrie, panneaux, clavier, mobile, création, modification, annulation,
+  conservation du contexte et du prompt de portrait, outils, favoris et erreurs.
+  Ces tests simulent les API, sans écriture distante.
+- Backend : `python manage.py test agent.test_identity` : création/lecture,
+  conservation des champs, modification, accès aux outils, visibilité et validation.
+  Vérifié localement sous Django 5.1.3 avec une base SQLite isolée, sans signaux
+  de génération d’embeddings et sans les index vectoriels PostgreSQL.
 
-`npx playwright test tests/e2e/agent-identity.spec.ts tests/e2e/agent-creation.spec.ts`
-vérifie les dimensions, le défilement indépendant, les détails chargés depuis
-l’API, la conservation des instructions à l’édition, les erreurs/reprises,
-le petit écran, le clavier, le glissement et les parcours de création existants.
-Les API de ces tests sont simulées, sans écriture sur le backend distant.
+## Suite
+
+Générer le portrait depuis le prompt et les résumés des rubriques, avec reprise
+sur erreur. Puis décliner cette identité dans l’application mobile.
