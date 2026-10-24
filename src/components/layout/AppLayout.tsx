@@ -15,29 +15,39 @@ const PAGES_WITH_PANEL: PageId[] = ['watch', 'conversations', 'groups', 'agents'
 
 export default function AppLayout({ children, panelContent }: AppLayoutProps) {
   const { user, isLoggedIn, logout } = useAuth();
-  const { currentPage, navigate, isSidebarPanelOpen, conversationView, selectedConversation } = useNavigation();
+  const { currentPage, navigate, isSidebarPanelOpen, toggleSidebarPanel, conversationView, selectedConversation } = useNavigation();
   const [isSearchExpanded, setIsSearchExpanded] = useState(false);
   const [savedPanelWidth, setSavedPanelWidth] = useState(() => {
     const stored = Number(localStorage.getItem('echo:sidebar-panel-width'));
     return Number.isFinite(stored) ? Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, stored)) : getSidebarPanelWidthForColumns(2);
   });
   const [isResizingPanel, setIsResizingPanel] = useState(false);
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const isConversationHome = ['conversations', 'groups', 'agents'].includes(currentPage) && !selectedConversation;
 
-  const isPanelOpen = PAGES_WITH_PANEL.includes(currentPage) && (isSidebarPanelOpen || currentPage === 'watch');
-  const isImmersivePage = currentPage === 'watch' || currentPage === 'add-friend' || currentPage === 'add-group' || currentPage === 'add-agent' || currentPage === 'marketplace' || currentPage === 'profile';
-  const panelWidth = Math.max(savedPanelWidth, isSearchExpanded ? getSidebarPanelWidthForColumns(2) : SIDEBAR_PANEL_MIN_WIDTH);
+  const isPanelOpen = PAGES_WITH_PANEL.includes(currentPage) && (isSidebarPanelOpen || currentPage === 'watch' || (dragWidth !== null && dragWidth > 0));
+  const isImmersivePage = isConversationHome || currentPage === 'watch' || currentPage === 'add-friend' || currentPage === 'add-group' || currentPage === 'add-agent' || currentPage === 'marketplace' || currentPage === 'profile';
+  const panelWidth = dragWidth ?? Math.max(savedPanelWidth, isSearchExpanded ? getSidebarPanelWidthForColumns(2) : SIDEBAR_PANEL_MIN_WIDTH);
   const panelColumns = panelWidth >= getSidebarPanelWidthForColumns(3) ? 3 : panelWidth >= getSidebarPanelWidthForColumns(2) ? 2 : 1;
   const handleSearchExpansionChange = useCallback((expanded: boolean) => setIsSearchExpanded(expanded), []);
   const handlePanelWidthChange = useCallback((width: number) => {
-    setSavedPanelWidth(Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(SIDEBAR_PANEL_MIN_WIDTH, width)));
-  }, []);
+    setDragWidth(Math.min(SIDEBAR_PANEL_MAX_WIDTH, Math.max(currentPage === 'watch' ? SIDEBAR_PANEL_MIN_WIDTH : 0, width)));
+  }, [currentPage]);
   const handlePanelResizeEnd = useCallback((width: number) => {
     const snapWidths = [1, 2, 3].map(getSidebarPanelWidthForColumns);
+    if (currentPage !== 'watch') snapWidths.unshift(0);
     const snapped = snapWidths.reduce((closest, candidate) => Math.abs(candidate - width) < Math.abs(closest - width) ? candidate : closest);
-    setSavedPanelWidth(snapped);
-    localStorage.setItem('echo:sidebar-panel-width', String(snapped));
+    if (snapped === 0) {
+      if (isSidebarPanelOpen) toggleSidebarPanel();
+      setIsSearchExpanded(false);
+    } else {
+      if (!isSidebarPanelOpen && currentPage !== 'watch') toggleSidebarPanel();
+      setSavedPanelWidth(snapped);
+      localStorage.setItem('echo:sidebar-panel-width', String(snapped));
+    }
+    setDragWidth(null);
     setIsResizingPanel(false);
-  }, []);
+  }, [currentPage, isSidebarPanelOpen, toggleSidebarPanel]);
 
   useEffect(() => setIsSearchExpanded(false), [currentPage, isSidebarPanelOpen]);
 
@@ -53,6 +63,7 @@ export default function AppLayout({ children, panelContent }: AppLayoutProps) {
           panelContent={isPanelOpen ? panelContent(currentPage, handleSearchExpansionChange, panelColumns) : null}
           panelWidth={panelWidth}
           isPanelOpen={isPanelOpen}
+          canResize={isPanelOpen || !!selectedConversation}
           isResizing={isResizingPanel}
           onResizeStart={() => setIsResizingPanel(true)}
           onPanelWidthChange={handlePanelWidthChange}

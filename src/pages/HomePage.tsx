@@ -1,3 +1,4 @@
+import { useWatchTileSize } from '../hooks/useWatchTileSize';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { IoArrowForward } from 'react-icons/io5';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,7 +18,7 @@ export default function HomePage() {
     const { openConversation, openWatch } = useNavigation();
     const { liveTurns } = useJarvis();
     // Keep compact tiles at a fixed size; resizing only changes the column count.
-    const [tileSize] = useState(() => Math.max(125, Math.round(Math.floor((window.screen.availWidth - 60 - 48 - 5 * 16) / 6) * 0.6)));
+    const tileSize = useWatchTileSize();
     const [pins, setPins] = useState(() => getPinnedConversationUuids(user?.uuid));
     const feed = useWatchFeed();
     const { privateConversations, groupConversations, agentConversations } = useConversations();

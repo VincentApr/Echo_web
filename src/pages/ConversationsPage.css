@@ -1,31 +1,5 @@
-.conversations-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  gap: 12px;
-  padding: 40px;
-  color: #aaa;
-  user-select: none;
-}
-
-.conversations-empty__icon {
-  color: rgba(10, 145, 104, 0.25);
-}
-
-.conversations-empty__title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #555;
-  margin: 0;
-}
-
-.conversations-empty__text {
-  font-size: 14px;
-  color: #999;
-  text-align: center;
-  max-width: 280px;
-  margin: 0;
-  line-height: 1.5;
-}
+.conversations-home .watch-card { overflow: visible; }
+.conversations-home .watch-grid { row-gap: 38px; }
+.conversations-home .conv-square__avatar { opacity: 1; border-radius: inherit; }
+.conversations-home .watch-card:focus-visible { outline: 2px solid var(--echo-green); outline-offset: 3px; }
+.conversations-home .conv-square__unread-badge { top: 6px; right: 6px; }

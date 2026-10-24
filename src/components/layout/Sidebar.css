@@ -11,7 +11,7 @@
     position: absolute;
     z-index: 30;
     top: 0;
-    right: -5px;
+    right: 0;
     width: 10px;
     height: 100%;
     cursor: ew-resize;
@@ -273,3 +273,5 @@
     opacity: 1;
     color: #ffcccc !important;
 }
+
+.sidebar__resize-handle--collapsed::after { background: rgba(55, 65, 81, .2); }

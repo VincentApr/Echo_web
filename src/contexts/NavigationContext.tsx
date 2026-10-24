@@ -69,9 +69,9 @@ const PAGE_TO_CONVERSATION_TAB: Partial<Record<PageId, ConversationPage>> = {
 };
 
 const createInitialTabMemories = (): Record<ConversationPage, TabMemory> => ({
-    conversations: { conversation: null, view: 'thread', isPanelOpen: true, replyTo: null },
-    groups: { conversation: null, view: 'thread', isPanelOpen: true, replyTo: null },
-    agents: { conversation: null, view: 'thread', isPanelOpen: true, replyTo: null },
+    conversations: { conversation: null, view: 'thread', isPanelOpen: false, replyTo: null },
+    groups: { conversation: null, view: 'thread', isPanelOpen: false, replyTo: null },
+    agents: { conversation: null, view: 'thread', isPanelOpen: false, replyTo: null },
 });
 
 export function NavigationProvider({ children }: { children: React.ReactNode }) {
@@ -126,7 +126,9 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
         sendCallbackRef.current = null;
 
         if (targetTab) {
-            applyTabMemory(tabMemoriesRef.current[targetTab]);
+            const memory = tabMemoriesRef.current[targetTab];
+            if (page.startsWith('add-')) memory.isPanelOpen = true;
+            applyTabMemory(memory);
             return;
         }
 
@@ -199,11 +201,14 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     }, []);
 
     const closeConversation = useCallback(() => {
+        sidebarPanelOpenRef.current = false;
+        setIsSidebarPanelOpen(false);
         const tab = PAGE_TO_CONVERSATION_TAB[currentPageRef.current];
         selectedConversationRef.current = null;
         conversationViewRef.current = 'thread';
         replyToRef.current = null;
         if (tab) {
+            tabMemoriesRef.current[tab].isPanelOpen = false;
             tabMemoriesRef.current[tab].conversation = null;
             tabMemoriesRef.current[tab].view = 'thread';
             tabMemoriesRef.current[tab].replyTo = null;

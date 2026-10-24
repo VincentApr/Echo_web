@@ -36,6 +36,7 @@ interface SidebarProps {
     panelContent: React.ReactNode | null;
     panelWidth: number;
     isPanelOpen: boolean;
+    canResize: boolean;
     isResizing: boolean;
     onResizeStart: () => void;
     onPanelWidthChange: (width: number) => void;
@@ -46,7 +47,7 @@ interface SidebarProps {
     onLogout: () => void;
 }
 
-export default function Sidebar({ activePage, onNavigate, panelContent, panelWidth, isPanelOpen, isResizing, onResizeStart, onPanelWidthChange, onResizeEnd, userPhoto, userName, isLoggedIn, onLogout }: SidebarProps) {
+export default function Sidebar({ activePage, onNavigate, panelContent, panelWidth, isPanelOpen, canResize, isResizing, onResizeStart, onPanelWidthChange, onResizeEnd, userPhoto, userName, isLoggedIn, onLogout }: SidebarProps) {
     const { user } = useAuth();
     const [hoveredItem, setHoveredItem] = useState<PageId | null>(null);
 
@@ -60,7 +61,7 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
     const handleResizePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
         event.preventDefault();
         const startX = event.clientX;
-        const startWidth = panelWidth;
+        const startWidth = isPanelOpen ? panelWidth : 0;
         onResizeStart();
         const handleMove = (moveEvent: PointerEvent) => onPanelWidthChange(startWidth + moveEvent.clientX - startX);
         const handleUp = (upEvent: PointerEvent) => {
@@ -146,7 +147,7 @@ export default function Sidebar({ activePage, onNavigate, panelContent, panelWid
                     )}
                 </div>
             </div>
-            {isPanelOpen && <div className="sidebar__resize-handle" onPointerDown={handleResizePointerDown} aria-label="Redimensionner la barre latérale" />}
+            {canResize && <div className={`sidebar__resize-handle ${!isPanelOpen ? 'sidebar__resize-handle--collapsed' : ''}`} onPointerDown={handleResizePointerDown} aria-label="Redimensionner la barre latérale" />}
         </div>
     );
 }

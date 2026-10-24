@@ -15,7 +15,7 @@ import { isAgentMessage, isEmbeddedAgentRoot, findEmbeddedAgentRoot } from '../.
 import { useQuery } from '@tanstack/react-query';
 import { fetchWithAuth } from '../../services/apiClient';
 import { API_BASE_URL } from '../../config/api';
-import { IoArrowForward, IoChevronBack, IoChevronForward, IoChevronDown, IoChevronUp } from 'react-icons/io5';
+import { IoArrowForward, IoChevronBack, IoChevronDown, IoChevronUp } from 'react-icons/io5';
 import './ConversationThread.css';
 
 interface ConversationThreadProps {
@@ -289,8 +289,7 @@ export function ConversationThread({
         openConversationManagement,
         replyTo,
         setReplyTo,
-        isSidebarPanelOpen,
-        toggleSidebarPanel,
+        closeConversation,
     } = useNavigation();
     const replyToRef = useRef(replyTo);
 
@@ -869,13 +868,11 @@ export function ConversationThread({
                 <button
                     type="button"
                     className="thread-back-btn"
-                    onClick={toggleSidebarPanel}
-                    title={isSidebarPanelOpen ? 'Fermer la liste' : 'Ouvrir la liste'}
-                    aria-label={isSidebarPanelOpen ? 'Fermer la liste des conversations' : 'Ouvrir la liste des conversations'}
+                    onClick={closeConversation}
+                    title="Retour aux conversations"
+                    aria-label="Retour aux conversations"
                 >
-                    {isSidebarPanelOpen
-                        ? <IoChevronBack size={22} />
-                        : <IoChevronForward size={22} />}
+                    <IoChevronBack size={22} />
                 </button>
                 <button type="button" className="thread-header-info" onClick={openConversationManagement}>
                     {conversationAvatar ? (
