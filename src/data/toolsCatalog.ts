@@ -1,4 +1,5 @@
 // Catalogue d'outils — enrichissement local des agents backend
+import type { IdentityTool } from '../utils/agentIdentity';
 
 export interface ToolItem {
     id: string;          // = agent uuid
@@ -15,6 +16,8 @@ export interface ToolItem {
     isPublic: boolean;
     visibility: 'private' | 'friends' | 'public';
     systemPrompt: string;
+    tools?: IdentityTool[];
+    agentType?: string;
 }
 
 export interface ToolCategory {
@@ -189,6 +192,8 @@ export interface BackendAgent {
     agent_type?: string;
     is_public?: boolean;
     avatar_url?: string;
+    avatar?: string | null;
+    tools?: Array<Omit<IdentityTool, 'name'> & { name?: string; display_name?: string }>;
     is_favorite?: boolean;
     is_mine?: boolean;
     visibility?: 'private' | 'friends' | 'public';
@@ -203,7 +208,7 @@ export function enrichAgent(agent: BackendAgent): ToolItem {
     return {
         id: agent.uuid,
         agentUuid: agent.uuid,
-        avatarUrl: agent.avatar_url,
+        avatarUrl: agent.avatar_url || agent.avatar || undefined,
         name: agent.name,
         description: agent.description || 'Agent IA disponible sur Echo.',
         longDescription: enrichment.longDescription || agent.description || 'Cet agent peut vous aider à automatiser vos tâches et répondre à vos questions.',
@@ -215,6 +220,8 @@ export function enrichAgent(agent: BackendAgent): ToolItem {
         isPublic: agent.visibility ? agent.visibility === 'public' : Boolean(agent.is_public),
         visibility: agent.visibility ?? (agent.is_public ? 'public' : 'private'),
         systemPrompt: agent.system_prompt || agent.instructions?.system_prompt || '',
+        tools: Array.isArray(agent.tools) ? agent.tools.map(tool => ({ ...tool, name: tool.display_name || tool.name || 'Outil' })) : [],
+        agentType: agent.agent_type,
     };
 }
 

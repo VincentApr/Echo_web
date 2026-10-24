@@ -58,8 +58,8 @@ test('creation defaults to private and adds the agent to favorites', async ({ pa
     expect(fixture.creations[0]).not.toHaveProperty('is_public');
     expect(fixture.favoriteCalls()).toBe(1);
     await page.getByRole('button', { name: 'Mes Agents', exact: true }).click();
-    await expect(page.locator('.agent-card__favorite')).toHaveText('Favori');
-    await expect(page.locator('.agent-card__visibility')).toHaveText('Privé');
+    await expect(page.locator('.identity-card--compact').getByRole('img', { name: 'Favori' })).toBeVisible();
+    await expect(page.locator('.identity-card--compact .identity-card__visibility')).toHaveText('Privé');
 });
 
 test('friends sharing has accurate labels and can be changed without public publishing', async ({ page }) => {
@@ -69,7 +69,7 @@ test('friends sharing has accurate labels and can be changed without public publ
     await expect(page.getByText('« Mon assistant » a été créé et ajouté aux favoris.')).toBeVisible();
     expect(fixture.creations[0].visibility).toBe('friends');
     await page.getByRole('button', { name: 'Mes Agents', exact: true }).click();
-    await expect(page.locator('.agent-card__visibility')).toHaveText('Amis uniquement');
+    await expect(page.locator('.identity-card--compact .identity-card__visibility')).toHaveText('Amis uniquement');
     await page.getByRole('heading', { name: 'Mon assistant' }).click();
     await expect(page.getByText('Visibilité : Amis uniquement')).toBeVisible();
     await expect(page.getByRole('button', { name: 'Rendre public' })).toHaveCount(0);

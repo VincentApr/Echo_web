@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     IoCheckmark, IoClose, IoCloudUploadOutline, IoDocumentTextOutline,
     IoLockClosedOutline, IoSearch, IoSparkles, IoStar, IoStarOutline,
-    IoChatbubblesOutline, IoCalendarOutline, IoInformationCircleOutline, IoPeopleOutline,
+    IoChatbubblesOutline, IoPeopleOutline,
     IoCreateOutline, IoTrashOutline, IoCompassOutline, IoPersonOutline, IoAddOutline,
 } from 'react-icons/io5';
 import { fetchWithAuth } from '@web/services/apiClient';
@@ -12,8 +12,12 @@ import { useNavigation } from '../contexts/NavigationContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useConversations, type Conversation } from '../hooks/useConversations';
 import { webDatabaseManager } from '../services/webDatabase';
-import { TOOL_CATEGORIES, enrichAgent, getCategoryById, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
+import { TOOL_CATEGORIES, enrichAgent, type BackendAgent, type ToolItem } from '../data/toolsCatalog';
 import { ensureAgentFavorite } from '../services/agentFavorites';
+import AgentIdentityCard from '../components/agents/AgentIdentityCard';
+import AgentIdentityDialog, { IdentityPanel } from '../components/agents/AgentIdentityDialog';
+import { composeAgentPrompt, type IdentityContent, type IdentitySection } from '../utils/agentIdentity';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import './MarketplacePage.css';
 
 type MarketplaceView = 'catalog' | 'mine' | 'create';
@@ -103,6 +107,26 @@ export default function MarketplacePage() {
         staleTime: 2 * 60_000,
     });
 
+    const agentDetails = useQuery({
+        queryKey: ['agents', 'identity', selectedAgent?.agentUuid],
+        enabled: Boolean(selectedAgent),
+        queryFn: async ({ signal }): Promise<BackendAgent> => {
+            const response = await fetchWithAuth(`${API_BASE_URL}/framework/agents/${selectedAgent!.agentUuid}/`, { signal });
+            if (!response.ok) throw new Error(await readError(response, 'Impossible de charger les informations de cet agent.'));
+            const data = await response.json() as BackendAgent;
+            if (data.uuid !== selectedAgent!.agentUuid) throw new Error('La fiche reçue ne correspond pas à cet agent.');
+            return data;
+        },
+        staleTime: 30_000,
+        refetchOnWindowFocus: false,
+    });
+    const activeAgent = selectedAgent && agentDetails.data ? {
+        ...enrichAgent(agentDetails.data),
+        isFavorite: selectedAgent.isFavorite,
+        isMine: selectedAgent.isMine,
+        visibility: agentDetails.data.visibility ?? selectedAgent.visibility,
+    } : selectedAgent;
+
     const displayedAgents = useMemo(() => {
         const query = search.trim().toLowerCase();
         const source = view === 'mine' ? myAgents : agents;
@@ -115,11 +139,11 @@ export default function MarketplacePage() {
     }, [activeCategory, agents, myAgents, search, view]);
 
     const closeDetails = useCallback(() => {
-        if (openingConversationRef.current) return;
+        if (openingConversationRef.current || agentActionPending) return;
         setSelectedAgent(null);
         setIsEditingAgent(false);
         setConfirmDelete(false);
-    }, []);
+    }, [agentActionPending]);
 
     const startConversation = async (agent: ToolItem) => {
         if (openingConversationRef.current || agentActionPending) return;
@@ -170,12 +194,6 @@ export default function MarketplacePage() {
         setCatalogError(null);
     };
 
-    useEffect(() => {
-        const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeDetails(); };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [closeDetails]);
-
     const toggleFavorite = async (agent: ToolItem) => {
         if (favoritePending) return;
         setCatalogError(null);
@@ -217,6 +235,7 @@ export default function MarketplacePage() {
                 visibility: updated.visibility ?? (data.visibility as BackendAgent['visibility']) ?? selectedAgent.visibility,
             });
             setSelectedAgent(enriched);
+            queryClient.setQueryData(['agents', 'identity', enriched.agentUuid], updated);
             setEditForm({ name: enriched.name, description: enriched.description, systemPrompt: enriched.systemPrompt });
             queryClient.setQueryData<ToolItem[]>(['agents', 'mine', 'marketplace'], (current = []) => (
                 current.map((item) => item.id === enriched.id ? enriched : item)
@@ -300,16 +319,11 @@ export default function MarketplacePage() {
         if (!form.systemPrompt.trim() && !form.documentation.trim() && documents.length === 0) {
             setCreatorError('Ajoutez au moins des instructions ou une documentation.'); return;
         }
-        const documentationParts = [
-            form.documentation.trim(),
-            ...documents.map((document) => `DOCUMENT : ${document.name}\n${document.content.trim()}`),
-        ].filter(Boolean);
-        const systemPrompt = [
+        const systemPrompt = composeAgentPrompt(
             form.systemPrompt.trim() || `Tu es ${form.name.trim()}, un agent spécialisé.`,
-            documentationParts.length
-                ? `DOCUMENTATION DE RÉFÉRENCE\nUtilise prioritairement les informations suivantes. Si elles ne suffisent pas, indique-le clairement.\n\n${documentationParts.join('\n\n---\n\n')}`
-                : '',
-        ].filter(Boolean).join('\n\n');
+            form.documentation,
+            documents,
+        );
 
         setPendingFavorite(null);
         setIsCreating(true); setCreatorError(null); setCreatorSuccess(null);
@@ -379,18 +393,15 @@ export default function MarketplacePage() {
                         <div className="marketplace-empty"><IoSparkles size={42} /><strong>{view === 'mine' ? 'Aucun agent créé' : 'Aucun agent trouvé'}</strong><span>{view === 'mine' ? 'Créez votre premier agent.' : 'Essayez une autre recherche.'}</span></div>
                     ) : (
                         <div className="marketplace-grid">
-                            {displayedAgents.map((agent) => {
-                                return <article className="agent-card" key={agent.id} onClick={() => openDetails(agent)}>
-                                    <div className="agent-card__top"><div className="agent-card__icon"><AgentGlyph categoryId={agent.categoryId} /></div><div className="agent-card__badges">{view === 'mine' && <span className="agent-card__visibility">{visibilityLabel(agent.visibility)}</span>}{agent.isFavorite && <span className="agent-card__favorite"><IoStar size={13} /> Favori</span>}</div></div>
-                                    <div><h2>{agent.name}</h2></div>
-                                    <div className="agent-card__example"><ChatExampleIcon /><span>{agent.examples[0]}</span></div>
-                                </article>;
-                            })}
+                            {displayedAgents.map((agent) => <AgentIdentityCard key={agent.id} agent={agent} compact
+                                visibilityLabel={view === 'mine' ? visibilityLabel(agent.visibility) : undefined}
+                                onOpen={() => openDetails(agent)} />)}
                         </div>
                     )}
                 </main>
             ) : (
                 <main className="agent-creator">
+                    <AgentIdentityPreview form={form} documents={documents} />
                     <CreatorIntro step="1" title="Rôle" />
                     <section className="agent-creator__form">
                         <div className="agent-creator__row">
@@ -417,47 +428,40 @@ export default function MarketplacePage() {
                 </main>
             )}
 
-            {selectedAgent && <div className="agent-detail-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeDetails(); }}>
-                <section className="agent-detail" role="dialog" aria-modal="true" aria-label={selectedAgent.name}>
-                    <button className="agent-detail__close" disabled={openingConversation} onClick={closeDetails}><IoClose size={18} /></button>
-                    <div className="agent-detail__icon"><AgentGlyph categoryId={selectedAgent.categoryId} /></div>
-                    {view === 'mine' && isEditingAgent ? (
-                        <div className="agent-detail__edit">
-                            <input value={editForm.name} onChange={(event) => setEditForm({ ...editForm, name: event.target.value })} placeholder="Nom" />
-                            <input value={editForm.description} onChange={(event) => setEditForm({ ...editForm, description: event.target.value })} placeholder="Description" />
-                            <textarea value={editForm.systemPrompt} onChange={(event) => setEditForm({ ...editForm, systemPrompt: event.target.value })} placeholder="Instructions système" rows={6} />
-                            <div><button onClick={() => setIsEditingAgent(false)}>Annuler</button><button className="is-primary" disabled={agentActionPending} onClick={() => void saveOwnedAgent()}>Enregistrer</button></div>
-                        </div>
-                    ) : (
-                        <>
-                            <h2>{selectedAgent.name}</h2><p>{selectedAgent.description}</p><h3>À essayer</h3>
-                            <div className="agent-detail__examples">{selectedAgent.examples.slice(0, 2).map((example) => <div key={example}><ChatExampleIcon /><span>{example}</span></div>)}</div>
-                        </>
-                    )}
-                    <small className="agent-detail__hint">Visibilité : {visibilityLabel(selectedAgent.visibility)}</small>
-                    {catalogError && <div className="agent-detail__error">{catalogError}</div>}
+            {activeAgent && <AgentIdentityDialog key={activeAgent.agentUuid} agent={activeAgent}
+                loading={agentDetails.isPending} error={agentDetails.isError ? agentDetails.error.message : null}
+                onRetry={() => void agentDetails.refetch()} onClose={closeDetails} onStopEditing={() => setIsEditingAgent(false)}
+                editing={isEditingAgent ? <form className="identity-edit" onSubmit={event => { event.preventDefault(); void saveOwnedAgent(); }}>
+                    <label>Nom<input autoFocus value={editForm.name} maxLength={100} onChange={event => setEditForm({ ...editForm, name: event.target.value })} /></label>
+                    <label>Description<input value={editForm.description} maxLength={500} onChange={event => setEditForm({ ...editForm, description: event.target.value })} /></label>
+                    <label>Instructions système<textarea value={editForm.systemPrompt} onChange={event => setEditForm({ ...editForm, systemPrompt: event.target.value })} rows={8} /></label>
+                    <div className="identity-edit__actions"><button type="button" className="identity-white-button" disabled={agentActionPending} onClick={() => setIsEditingAgent(false)}>Annuler</button><button className="identity-white-button" disabled={agentActionPending}>Enregistrer</button></div>
+                </form> : undefined}
+                actions={<>
+                    {catalogError && <p className="identity-dialog__error" role="alert">{catalogError}</p>}
+                    <p className="identity-dialog__hint">Visibilité : {visibilityLabel(activeAgent.visibility)}</p>
                     {!isEditingAgent && <>
-                        <div className="agent-detail__actions">
-                        <button className={`agent-detail__favorite ${selectedAgent.isFavorite ? 'is-favorite' : ''}`} disabled={favoritePending === selectedAgent.agentUuid} onClick={() => void toggleFavorite(selectedAgent)}>
-                            {selectedAgent.isFavorite ? <IoStar size={19} /> : <IoStarOutline size={19} />}{favoritePending === selectedAgent.agentUuid ? 'Mise à jour…' : selectedAgent.isFavorite ? 'Retirer de mes favoris' : 'Ajouter à mes favoris'}
-                        </button>
-                        <button type="button" className="agent-detail__start" disabled={openingConversation || agentActionPending} onClick={() => void startConversation(selectedAgent)}>
-                            <IoChatbubblesOutline size={19} />{openingConversation ? 'Ouverture…' : 'Commencer une conversation'}
-                        </button>
+                        <div className="identity-actions">
+                            <button className="identity-white-button" aria-pressed={activeAgent.isFavorite} disabled={favoritePending === activeAgent.agentUuid} onClick={() => void toggleFavorite(activeAgent)}>
+                                {activeAgent.isFavorite ? <IoStar size={17} /> : <IoStarOutline size={17} />}{favoritePending === activeAgent.agentUuid ? 'Mise à jour…' : activeAgent.isFavorite ? 'Retirer de mes favoris' : 'Ajouter à mes favoris'}
+                            </button>
+                            <button className="identity-white-button" disabled={openingConversation || agentActionPending} onClick={() => void startConversation(activeAgent)}>
+                                <IoChatbubblesOutline size={17} />{openingConversation ? 'Ouverture…' : 'Commencer une conversation'}
+                            </button>
                         </div>
-                        <small className="agent-detail__hint">Les favoris apparaissent dans + → Agents au sein de vos conversations.</small>
+                        {activeAgent.isMine && !openingConversation && <div className="identity-actions">
+                            <button className="identity-white-button" disabled={agentDetails.isPending || agentDetails.isError || agentActionPending} onClick={() => {
+                                setEditForm({ name: activeAgent.name, description: activeAgent.description, systemPrompt: activeAgent.systemPrompt });
+                                setIsEditingAgent(true);
+                            }}><IoCreateOutline size={17} />Modifier</button>
+                            <button className="identity-white-button" disabled={agentActionPending} onClick={() => void toggleVisibility()}>{activeAgent.visibility === 'private' ? <IoPeopleOutline size={17} /> : <IoLockClosedOutline size={17} />}{activeAgent.visibility === 'private' ? 'Partager avec mes amis' : 'Rendre privé'}</button>
+                            {!confirmDelete ? <button className="identity-white-button identity-white-button--danger" disabled={agentActionPending} onClick={() => setConfirmDelete(true)}><IoTrashOutline size={17} />Supprimer</button>
+                                : <div className="identity-delete-confirm"><span>Supprimer cet agent ?</span><button className="identity-white-button" disabled={agentActionPending} onClick={() => setConfirmDelete(false)}>Non</button><button className="identity-white-button identity-white-button--danger" disabled={agentActionPending} onClick={() => void deleteOwnedAgent()}>Oui</button></div>}
+                        </div>}
+                        <p className="identity-dialog__hint">Les favoris apparaissent dans + → Agents au sein de vos conversations.</p>
                     </>}
-                    {view === 'mine' && !isEditingAgent && !openingConversation && <div className="agent-detail__management">
-                        <button onClick={() => setIsEditingAgent(true)}><IoCreateOutline size={17} /><span>Modifier</span></button>
-                        <button disabled={agentActionPending} onClick={() => void toggleVisibility()}>{selectedAgent.visibility === 'private' ? <IoPeopleOutline size={17} /> : <IoLockClosedOutline size={17} />}<span>{selectedAgent.visibility === 'private' ? 'Partager avec mes amis' : 'Rendre privé'}</span></button>
-                        {!confirmDelete ? (
-                            <button className="is-danger" onClick={() => setConfirmDelete(true)}><IoTrashOutline size={17} /><span>Supprimer</span></button>
-                        ) : (
-                            <div className="agent-detail__delete-confirm"><span>Supprimer cet agent ?</span><button onClick={() => setConfirmDelete(false)}>Non</button><button disabled={agentActionPending} onClick={() => void deleteOwnedAgent()}>Oui</button></div>
-                        )}
-                    </div>}
-                </section>
-            </div>}
+                </>} />}
+
         </div>
     );
 }
@@ -474,12 +478,18 @@ function VisibilityChoice({ active, icon, title, hint, onClick }: { active: bool
     return <button className={`agent-creator__visibility ${active ? 'is-active' : ''}`} onClick={onClick}>{icon}<span><strong>{title}</strong><small>{hint}</small></span>{active && <IoCheckmark />}</button>;
 }
 
-function ChatExampleIcon() { return <span className="chat-example-icon" aria-hidden="true">↗</span>; }
-
-function AgentGlyph({ categoryId }: { categoryId: string }) {
-    if (categoryId === 'communication') return <IoChatbubblesOutline size={22} />;
-    if (categoryId === 'organisation') return <IoCalendarOutline size={22} />;
-    if (categoryId === 'infos') return <IoInformationCircleOutline size={22} />;
-    if (categoryId === 'social') return <IoPeopleOutline size={22} />;
-    return <IoSparkles size={22} />;
+function AgentIdentityPreview({ form, documents }: { form: CreatorForm; documents: AgentDocument[] }) {
+    const [section, setSection] = useState<IdentitySection | null>(null);
+    const trigger = useRef<HTMLButtonElement | null>(null);
+    const overlay = useMediaQuery('(max-width: 1250px)');
+    const close = () => { setSection(null); requestAnimationFrame(() => trigger.current?.focus()); };
+    const agent = enrichAgent({ uuid: 'draft', name: form.name.trim() || 'Votre agent', description: form.description.trim() || 'Son rôle, en quelques mots.', system_prompt: form.systemPrompt });
+    const content: IdentityContent = { instructions: form.systemPrompt, context: form.documentation, documents, tools: [] };
+    return <section className="agent-creator__identity-preview" aria-label="Aperçu de la carte">
+        <p>Votre carte prend forme. Cliquez sur une rubrique pour consulter son contenu.</p>
+        <div className="identity-preview__row" onKeyDown={event => { if (event.key === 'Escape' && section) { event.stopPropagation(); close(); } }}>
+            <AgentIdentityCard agent={agent} content={content} inert={overlay && Boolean(section)} activeSection={section} onSection={(next, button) => { trigger.current = button; setSection(next); }} />
+            {section && <IdentityPanel section={section} content={content} onClose={close} />}
+        </div>
+    </section>;
 }
