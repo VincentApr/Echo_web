@@ -1,3 +1,4 @@
+import AgentHistoryPanel from './components/panels/AgentHistoryPanel'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { JarvisProvider } from './contexts/JarvisContext'
@@ -69,6 +70,7 @@ function AppContent() {
     if (!isLoggedIn) return null;
 
     if (activePage === 'watch') return <WatchList columns={columns} />;
+    if (activePage === 'agents') return <AgentHistoryPanel />;
     const filterMap: Partial<Record<PageId, 'private' | 'groups' | 'agents'>> = {
       conversations: 'private',
       groups: 'groups',

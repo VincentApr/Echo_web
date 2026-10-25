@@ -127,7 +127,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
 
         if (targetTab) {
             const memory = tabMemoriesRef.current[targetTab];
-            if (page.startsWith('add-')) memory.isPanelOpen = true;
+            if (page.startsWith('add-')) memory.isPanelOpen = page !== 'add-agent';
             applyTabMemory(memory);
             return;
         }

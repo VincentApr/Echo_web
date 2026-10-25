@@ -7,6 +7,7 @@ import './AgentIdentityCard.css';
 interface Props {
     agent: ToolItem;
     compact?: boolean;
+    selected?: boolean;
     visibilityLabel?: string;
     content?: IdentityContent;
     loading?: boolean;
@@ -28,7 +29,7 @@ function Portrait({ agent }: { agent: ToolItem }) {
     </span>;
 }
 
-export default function AgentIdentityCard({ agent, compact = false, visibilityLabel, content = identityContent(agent), loading, unavailable, inert, activeSection, onSection, onOpen, onEdit }: Props) {
+export default function AgentIdentityCard({ agent, compact = false, selected, visibilityLabel, content = identityContent(agent), loading, unavailable, inert, activeSection, onSection, onOpen, onEdit }: Props) {
     const surface = useRef<HTMLDivElement>(null);
     const drag = useRef<{ id: number; x: number; y: number } | null>(null);
     const style = { '--identity-hue': identityHue(agent.agentUuid) } as CSSProperties;
@@ -65,10 +66,18 @@ export default function AgentIdentityCard({ agent, compact = false, visibilityLa
         </div>
     </> : <>
         <Portrait agent={agent} />
-        <div className="identity-card__name"><h2 title={agent.name}>{agent.name}</h2><p>{agent.description}</p></div>
+        <div className="identity-card__name"><div className="identity-card__read-name"><h2 title={agent.name}>{agent.name}</h2></div><div className="identity-card__read-description"><p>{agent.description}</p></div></div>
     </>;
 
-    if (compact) return <button type="button" className="identity-card identity-card--compact" style={style} onClick={onOpen} aria-label={`Voir la carte de ${agent.name}`}>
+    if (compact) return <button type="button" className="identity-card identity-card--compact" style={style} onClick={onOpen} aria-pressed={selected} aria-label={selected === undefined ? `Voir la carte de ${agent.name}` : `Sélectionner ${agent.name}`}
+        onPointerMove={event => {
+            if (event.pointerType !== 'mouse' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+            const bounds = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.style.setProperty('--identity-rx', `${(0.5 - (event.clientY - bounds.top) / bounds.height) * 7}deg`);
+            event.currentTarget.style.setProperty('--identity-ry', `${((event.clientX - bounds.left) / bounds.width - 0.5) * 9}deg`);
+            event.currentTarget.style.setProperty('--identity-shine', `${(event.clientX - bounds.left) / bounds.width * 100}%`);
+        }}
+        onPointerLeave={event => { event.currentTarget.style.removeProperty('--identity-rx'); event.currentTarget.style.removeProperty('--identity-ry'); event.currentTarget.style.removeProperty('--identity-shine'); }}>
         <span className="identity-card__glow" aria-hidden="true" />
         <span className="identity-card__compact-body">
             <span className="identity-card__compact-header">
@@ -77,6 +86,7 @@ export default function AgentIdentityCard({ agent, compact = false, visibilityLa
             </span>
             <span className="identity-card__name identity-card__compact-description"><p>{agent.description}</p></span>
         </span>
+        <span className="identity-card__reflection" aria-hidden="true" />
         {agent.isFavorite && <span className="identity-card__favorite" role="img" aria-label="Favori" title="Favori"><IoStar aria-hidden="true" /></span>}
     </button>;
 
@@ -96,6 +106,7 @@ export default function AgentIdentityCard({ agent, compact = false, visibilityLa
                     })}
                 </div>
             </div>
+
             <div className="identity-card__reflection" aria-hidden="true" />
         </div>
     </div>;

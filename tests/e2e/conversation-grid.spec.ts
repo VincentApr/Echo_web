@@ -23,7 +23,6 @@ async function setup(page: Page) {
 for (const tab of [
     { label: 'Conversations', name: 'Alice', add: 'Nouvelle conversation' },
     { label: 'Groupes', name: 'Équipe', add: 'Nouveau groupe' },
-    { label: 'Jarvis', name: 'Atelier', add: 'Nouvel agent' },
 ]) {
     test(`${tab.label}: first visit is a grid, returning closes the sidebar`, async ({ page }, testInfo) => {
         await setup(page);

@@ -1,0 +1,19 @@
+.agent-history__list { display: flex; flex-direction: column; }
+.agent-history__row { display: flex; gap: 20px; align-items: center; width: 100%; padding: 20px 16px; border: 0; border-top: 1px solid #52675c13; border-radius: 0; background: transparent; color: #303b35; cursor: pointer; text-align: left; font: inherit; }
+.agent-history__row:hover { background: #ffffff70; border-radius: 14px; }
+.agent-history__row:focus-visible { outline: 2px solid #587b6b; outline-offset: -2px; border-radius: 14px; }
+.agent-history__copy { flex: 1; min-width: 0; display: grid; gap: 7px; }
+.agent-history__copy strong { font-size: 14px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-history__copy > span { color: #818781; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-history__meta { display: flex; align-items: center; gap: 15px; font-size: 11px; color: #89918c; white-space: nowrap; }
+.agent-history__unread { background: #e1e9e3; color: #4a6958; padding: 3px 6px; border-radius: 8px; }
+.agent-history__more { margin-top: 20px; }
+
+.agent-history__row[aria-current=page] { background: #ffffffa6; border-radius: 12px; }
+.agent-history-panel { padding: 24px 0; container-type: inline-size; }
+.agent-history-panel h2 { font-size: 15px; margin: 0 4px 20px; overflow-wrap: anywhere; }
+.agent-history-panel .agent-history__row { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 8px; }
+.agent-history-panel .agent-history__copy strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.agent-history-panel .agent-history__meta { justify-content: space-between; }
+.agent-history-panel .agent-history__meta svg { display: none; }
+.agent-history-panel .agent-history__more { padding: 8px; font-size: 11px; width: 100%; }

@@ -1,3 +1,4 @@
+import AgentCollectionPage from './AgentCollectionPage';
 import { IoAdd } from 'react-icons/io5';
 import type { CSSProperties } from 'react';
 import { useConversations } from '../hooks/useConversations';
@@ -11,11 +12,13 @@ import './ConversationsPage.css';
 
 export default function ConversationsPage() {
   const { selectedConversation, conversationView, currentPage, openConversation, navigate } = useNavigation();
-  const { privateConversations, groupConversations, agentConversations, isLoading } = useConversations();
+  const { privateConversations, groupConversations, agentConversations, isLoading, error, refreshAll } = useConversations();
   const tileSize = useWatchTileSize();
   const conversations = currentPage === 'groups' ? groupConversations : currentPage === 'agents' ? agentConversations : privateConversations;
   const title = currentPage === 'groups' ? 'Groupes' : currentPage === 'agents' ? 'Conversations avec les agents' : 'Conversations';
   const addLabel = currentPage === 'groups' ? 'Nouveau groupe' : currentPage === 'agents' ? 'Nouvel agent' : 'Nouvelle conversation';
+
+  if (!selectedConversation && currentPage === 'agents') return <AgentCollectionPage conversations={agentConversations} loading={isLoading} error={error} retry={() => void refreshAll()} />;
 
   if (!selectedConversation) {
     return <section className="watch-home conv-panel conversations-home" style={{ '--watch-tile-size': `${tileSize}px` } as CSSProperties} aria-label={title}>

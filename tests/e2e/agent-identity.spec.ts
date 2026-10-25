@@ -51,6 +51,9 @@ test('the card stays fixed while a matching-height side panel scrolls all detail
     await openCard(page);
     const card = page.locator('.identity-card--full');
     const before = await card.boundingBox();
+    const portraitBox = (await card.locator('.identity-portrait').boundingBox())!;
+    const imageBox = (await card.locator('.identity-portrait img').boundingBox())!;
+    expect(imageBox.height).toBeLessThanOrEqual(portraitBox.height + 1);
     const actions = page.getByRole('dialog').locator('.identity-actions');
     expect(await actions.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
     await expect(page.getByRole('button', { name: 'Fermer la carte' })).not.toBeFocused();
@@ -186,10 +189,20 @@ test('leaving edit mode discards changes and restores the original card in the s
     const fixture = await setup(page);
     await openCard(page);
     await expect(page.getByText('Identité de l’agent', { exact: true })).toHaveCount(0);
+    const identityGeometry = () => page.locator('.identity-card--full').evaluate(card => {
+        const bounds = card.getBoundingClientRect();
+        return ['.identity-portrait', '.identity-card__name h2', '.identity-card__name p', '.identity-card__sections'].map(selector => {
+            const item = card.querySelector(selector)!.getBoundingClientRect();
+            return [item.x - bounds.x, item.y - bounds.y, item.width, item.height].map(Math.round);
+        });
+    });
+    const readGeometry = await identityGeometry();
+
     await page.getByRole('button', { name: /^Contexte/ }).click();
     await page.getByRole('button', { name: 'Modifier', exact: true }).click();
     await page.locator('.identity-card-perspective').evaluate(async element => { await Promise.all(element.getAnimations().map(animation => animation.finished)); });
     await expect(page.locator('.identity-panel')).toHaveCount(0);
+    expect(await identityGeometry()).toEqual(readGeometry);
     await page.screenshot({ path: test.info().outputPath('editing-actions.png'), animations: 'disabled' });
     await page.getByRole('button', { name: 'Modifier le nom' }).click();
     await page.getByLabel('Nom de l’agent').fill('Brouillon');

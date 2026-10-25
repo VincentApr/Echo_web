@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { IoChevronBack, IoSearchOutline, IoSparklesOutline, IoStar, IoStarOutline } from 'react-icons/io5';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAgentFramework, type Agent } from '../hooks/useAgentFramework';
-import { useConversations } from '../hooks/useConversations';
+import { useConversations, type Conversation } from '../hooks/useConversations';
+import { useAuth } from '../contexts/AuthContext';
+import { conversationAgentUuid } from '../services/agentCollection';
+import { webDatabaseManager } from '../services/webDatabase';
 import { useNavigation } from '../contexts/NavigationContext';
 import { fetchWithAuth } from '@web/services/apiClient';
 import { API_BASE_URL } from '@web/config/api';
@@ -10,6 +13,8 @@ import './AddPage.css';
 
 export default function AddAgentPage() {
     const { navigate, openConversation } = useNavigation();
+    const { user } = useAuth();
+    const [error, setError] = useState<string | null>(null);
     const { myAgents, publicAgents, isLoading, toggleFavorite } = useAgentFramework();
     const { agentConversations } = useConversations();
     const queryClient = useQueryClient();
@@ -25,49 +30,30 @@ export default function AddAgentPage() {
     const handleOpenAgent = async (agent: Agent) => {
         if (openingUuid) return;
         setOpeningUuid(agent.uuid);
+        setError(null);
         try {
             // Look for existing conversation with this agent
-            const existing = agentConversations.find(c =>
-                c.framework_agent?.uuid === agent.uuid ||
-                c.agent_info?.uuid === agent.uuid ||
-                (c as any).agent_uuid === agent.uuid
-            );
+            const existing = agentConversations.find(c => conversationAgentUuid(c) === agent.uuid);
             if (existing) {
                 openConversation(existing);
                 return;
             }
-            // Create new conversation with this agent
-            const res = await fetchWithAuth(`${API_BASE_URL}/framework/agents/${agent.uuid}/start-conversation/`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({}),
+            const res = await fetchWithAuth(`${API_BASE_URL}/messaging/conversations/agents/create/`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ agent_uuid: agent.uuid }),
             });
-            if (res.ok) {
-                await queryClient.invalidateQueries({ queryKey: ['conversations', 'agents'] });
-                // Fetch the updated list to find the new conversation
-                const listRes = await fetchWithAuth(`${API_BASE_URL}/messaging/conversations/agents/`);
-                if (listRes.ok) {
-                    const data = await listRes.json();
-                    const convs = Array.isArray(data) ? data : data.results || [];
-                    const newConv = convs.find((c: any) =>
-                        c.framework_agent?.uuid === agent.uuid ||
-                        c.agent_info?.uuid === agent.uuid
-                    );
-                    if (newConv) {
-                        const enriched = {
-                            ...newConv,
-                            conversation_type: 'agent' as const,
-                            name: newConv.framework_agent?.name || agent.name || 'Agent',
-                            avatar_url: newConv.framework_agent?.avatar_url || agent.avatar_url || '',
-                        };
-                        openConversation(enriched);
-                        return;
-                    }
-                }
-                // Fallback: just navigate to agents view
-                navigate('agents');
-            }
-        } catch { /* silent */ }
+            if (!res.ok) throw new Error('Impossible de créer cette conversation. Réessaie dans un instant.');
+            const data = await res.json() as Partial<Conversation>;
+            if (!data.uuid) throw new Error('La conversation créée ne contient pas d’identifiant.');
+            const conversation: Conversation = {
+                ...data, uuid: data.uuid, conversation_type: 'agent', unread_count: 0,
+                name: agent.name, avatar_url: agent.avatar_url || '',
+                framework_agent: { uuid: agent.uuid, name: agent.name, avatar_url: agent.avatar_url || '' },
+            };
+            if (user?.uuid) await webDatabaseManager.upsertConversation(conversation as unknown as Record<string, unknown>, user.uuid);
+            await queryClient.invalidateQueries({ queryKey: ['conversations', 'agents'] });
+            openConversation(conversation);
+        } catch (error) { setError(error instanceof Error ? error.message : 'Impossible de créer la conversation.'); }
         finally { setOpeningUuid(null); }
     };
 
@@ -85,6 +71,7 @@ export default function AddAgentPage() {
             </div>
 
             <div className="add-page__content">
+                {error && <p role="alert">{error}</p>}
                 {/* Tabs */}
                 <div className="add-page__tabs">
                     <button className={`add-page__tab ${tab === 'mine' ? 'add-page__tab--active' : ''}`} onClick={() => setTab('mine')}>
